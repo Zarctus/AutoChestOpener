@@ -1,14 +1,17 @@
 ## Interface: 120000
 ## Title: |cff00ccffAuto Chest Opener|r
-## Notes: Automatically opens chests, bags, and containers 3 seconds after receiving them
-## Notes-frFR: Ouvre automatiquement les coffres, sacs et conteneurs 3 secondes après réception
+## Notes: Automatically opens chests, bags, and containers after receiving them
+## Notes-frFR: Ouvre automatiquement les coffres, sacs et conteneurs après réception
 ## Author: Zarctus
-## Category: Zarctus
-## Version: 1.0.0
+## Category: Inventory
+## Version: 1.1.0
 ## SavedVariables: AutoChestOpenerDB
 ## IconTexture: Interface\Icons\inv_misc_treasurechest02a
 ## X-Category: Inventory
 ## X-License: MIT
+## X-Website: https://github.com/Zarctus/AutoChestOpener
+## X-Curse-Project-ID: 
+## X-WoWI-ID: 
 
 ## OptionalDeps: ElvUI
 

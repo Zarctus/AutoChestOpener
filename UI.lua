@@ -1,10 +1,34 @@
 --[[
     Auto Chest Opener - UI Module
     Modern and elegant interface inspired by WoW's new UI style
-    Version: 1.0.0
+    Version: 1.1.0
 ]]
 
 local addonName, ACO = ...
+
+-- ============================================================================
+-- LOCAL UPVALUES (Performance Optimization)
+-- ============================================================================
+
+local pairs, ipairs, type = pairs, ipairs, type
+local tonumber, tostring = tonumber, tostring
+local format = string.format
+local floor, max, min, cos, sin, atan2, deg = math.floor, math.max, math.min, math.cos, math.sin, math.atan2, math.deg
+local tinsert, wipe = table.insert, wipe
+
+-- WoW API upvalues
+local CreateFrame = CreateFrame
+local CreateColor = CreateColor
+local PlaySound = PlaySound
+local GameTooltip = GameTooltip
+local GetCursorPosition = GetCursorPosition
+local GetCursorInfo = GetCursorInfo
+local ClearCursor = ClearCursor
+local IsAltKeyDown = IsAltKeyDown
+local C_Item = C_Item
+local C_Timer = C_Timer
+local Item = Item
+local SOUNDKIT = SOUNDKIT
 
 ACO.UI = {}
 local UI = ACO.UI
@@ -292,10 +316,10 @@ local function CreateModernSlider(parent, label, minVal, maxVal, step, tooltip)
         fill:SetWidth(math.max(1, percent * trackWidth))
         
         -- Format: afficher sans décimale si c'est un entier
-        if value == math.floor(value) then
-            valueText:SetText(string.format("%d", value) .. "s")
+        if value == floor(value) then
+            valueText:SetText(format("%d", value) .. "s")
         else
-            valueText:SetText(string.format("%.1f", value) .. "s")
+            valueText:SetText(format("%.1f", value) .. "s")
         end
         
         frame.value = value
@@ -546,10 +570,10 @@ function ACO:InitUI()
         if DelaySlider.valueText then
             -- Afficher la valeur même si le slider n'est pas visible
             local val = ACO.db.delay
-            if val == math.floor(val) then
-                DelaySlider.valueText:SetText(string.format("%d", val) .. "s")
+            if val == floor(val) then
+                DelaySlider.valueText:SetText(format("%d", val) .. "s")
             else
-                DelaySlider.valueText:SetText(string.format("%.1f", val) .. "s")
+                DelaySlider.valueText:SetText(format("%.1f", val) .. "s")
             end
         end
     end)
@@ -925,7 +949,7 @@ function ACO:InitUI()
         end
         
         -- Update scroll child height
-        ScrollChild:SetHeight(math.max(1, (index - 1) * (LIST_ITEM_HEIGHT + 4)))
+        ScrollChild:SetHeight(max(1, (index - 1) * (LIST_ITEM_HEIGHT + 4)))
         
         -- Update count
         local count = index - 1

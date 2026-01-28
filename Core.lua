@@ -1,17 +1,39 @@
 --[[
     Auto Chest Opener - Core Module
     Automatically opens chests, bags and containers after receiving them
-    Version: 1.0.0
+    Version: 1.1.0
 ]]
 
 local addonName, ACO = ...
+
+-- ============================================================================
+-- LOCAL UPVALUES (Performance Optimization)
+-- ============================================================================
+
+local pairs, ipairs, type = pairs, ipairs, type
+local tonumber, tostring = tonumber, tostring
+local format, lower, match, gmatch = string.format, string.lower, string.match, string.gmatch
+local tinsert, tremove, wipe = table.insert, table.remove, wipe
+local floor, max, min = math.floor, math.max, math.min
+
+-- WoW API upvalues
+local C_Container = C_Container
+local C_Item = C_Item
+local C_Timer = C_Timer
+local CreateFrame = CreateFrame
+local InCombatLockdown = InCombatLockdown
+local PlaySound = PlaySound
+local GetCursorInfo = GetCursorInfo
+local ClearCursor = ClearCursor
+local CopyTable = CopyTable
+local strsplit = strsplit
 
 -- ============================================================================
 -- ADDON INITIALIZATION
 -- ============================================================================
 
 ACO.name = addonName
-ACO.version = "1.0.0"
+ACO.version = "1.1.0"
 ACO.pendingItems = {}
 ACO.itemQueue = {}
 
@@ -57,8 +79,8 @@ ACO.SOUNDS = {
 -- ============================================================================
 
 function ACO:Print(msg, isError)
-    local color = isError and ACO.colors.error or ACO.colors.primary
-    local prefix = string.format("|cff%02x%02x%02x[ACO]|r", 
+    local color = isError and self.colors.error or self.colors.primary
+    local prefix = format("|cff%02x%02x%02x[ACO]|r", 
         color.r * 255, color.g * 255, color.b * 255)
     DEFAULT_CHAT_FRAME:AddMessage(prefix .. " " .. msg)
 end
@@ -74,25 +96,35 @@ function ACO:FormatItemLink(itemID)
     return itemLink or ("|cffffffff[Item:" .. itemID .. "]|r")
 end
 
+-- Cache pour les items vérifiés (évite les vérifications répétées)
+ACO.containerCache = {}
+
 function ACO:IsContainerItem(itemID)
     if not itemID then return false end
     
-    -- Check user-defined containers
+    -- Check user-defined containers (priorité)
     if self.db and self.db.containers[itemID] then
         return true
     end
     
-    -- Check if item has "Open" as a spell (can be opened)
-    local itemSpell, spellID = C_Item.GetItemSpell(itemID)
-    if itemSpell then
-        local spellName = string.lower(itemSpell)
-        -- Common opening spell names
-        if spellName == "open" or spellName == "ouvrir" or 
-           spellName == "öffnen" or spellName == "abrir" then
-            return true
-        end
+    -- Check cache
+    if self.containerCache[itemID] ~= nil then
+        return self.containerCache[itemID]
     end
     
+    -- Check if item has "Open" as a spell (can be opened)
+    local itemSpell = C_Item.GetItemSpell(itemID)
+    if itemSpell then
+        local spellName = lower(itemSpell)
+        -- Common opening spell names (multi-language support)
+        local isContainer = spellName == "open" or spellName == "ouvrir" or 
+                           spellName == "öffnen" or spellName == "abrir" or
+                           spellName == "открыть" or spellName == "열기"
+        self.containerCache[itemID] = isContainer
+        return isContainer
+    end
+    
+    self.containerCache[itemID] = false
     return false
 end
 
@@ -132,11 +164,11 @@ end
 function ACO:OpenItem(itemID)
     if InCombatLockdown() then
         self:Debug("Cannot open item in combat, queuing...")
-        table.insert(self.itemQueue, itemID)
+        tinsert(self.itemQueue, itemID)
         return false
     end
     
-    local bag, slot, info = self:FindItemInBags(itemID)
+    local bag, slot = self:FindItemInBags(itemID)
     if not bag then
         self:Debug("Item not found in bags: " .. itemID)
         return false
@@ -147,7 +179,7 @@ function ACO:OpenItem(itemID)
     
     if self.db.showNotifications then
         local itemLink = self:FormatItemLink(itemID)
-        self:Print(string.format("Ouverture de %s...", itemLink))
+        self:Print(format("Ouverture de %s...", itemLink))
     end
     
     if self.db.notificationSound then
@@ -168,18 +200,19 @@ function ACO:QueueItem(itemID, itemLink)
     end
     
     self.pendingItems[itemID] = true
+    local delay = self.db.delay
     
     if self.db.showNotifications then
         local link = itemLink or self:FormatItemLink(itemID)
-        self:Print(string.format("Ouverture de %s dans %d secondes...", 
-            link, self.db.delay))
+        self:Print(format("Ouverture de %s dans %d secondes...", link, delay))
     end
     
-    -- Schedule opening
-    C_Timer.After(self.db.delay, function()
-        self.pendingItems[itemID] = nil
-        if self:CanOpenItem(itemID) then
-            self:OpenItem(itemID)
+    -- Schedule opening avec référence locale pour éviter les closures coûteuses
+    local selfRef = self
+    C_Timer.After(delay, function()
+        selfRef.pendingItems[itemID] = nil
+        if selfRef:CanOpenItem(itemID) then
+            selfRef:OpenItem(itemID)
         end
     end)
 end
@@ -196,16 +229,15 @@ function ACO:OpenAllContainers()
     
     local opened = 0
     local toOpen = {}
+    local containers = self.db.containers
     
-    -- Collect all containers in bags
+    -- Collect all containers in bags (optimisé avec cache local)
     for bag = 0, 4 do
         local numSlots = C_Container.GetContainerNumSlots(bag)
         for slot = 1, numSlots do
             local info = C_Container.GetContainerItemInfo(bag, slot)
-            if info and info.itemID then
-                if self.db.containers[info.itemID] then
-                    table.insert(toOpen, {bag = bag, slot = slot, itemID = info.itemID, link = info.hyperlink})
-                end
+            if info and info.itemID and containers[info.itemID] then
+                tinsert(toOpen, {bag = bag, slot = slot, itemID = info.itemID, link = info.hyperlink})
             end
         end
     end
@@ -215,16 +247,20 @@ function ACO:OpenAllContainers()
         return 0
     end
     
-    -- Open with delay between each
-    local delay = 0.5
+    -- Open with delay between each (0.5s pour éviter le spam)
+    local delayBetween = 0.5
+    local totalCount = #toOpen
+    local showNotif = self.db.showNotifications
+    local selfRef = self
+    
     for i, data in ipairs(toOpen) do
-        C_Timer.After((i - 1) * delay, function()
+        C_Timer.After((i - 1) * delayBetween, function()
             if not InCombatLockdown() then
                 C_Container.UseContainerItem(data.bag, data.slot)
                 opened = opened + 1
-                if self.db.showNotifications then
-                    self:Print(string.format("Ouverture de %s (%d/%d)", 
-                        data.link or self:FormatItemLink(data.itemID), i, #toOpen))
+                if showNotif then
+                    selfRef:Print(format("Ouverture de %s (%d/%d)", 
+                        data.link or selfRef:FormatItemLink(data.itemID), i, totalCount))
                 end
             end
         end)
@@ -369,21 +405,24 @@ function ACO:ScanBagsForContainers()
     if not self.db or not self.db.enabled then return end
     
     local currentBagState = {}
+    local lastState = self.lastBagState
+    local pendingItems = self.pendingItems
     
     for bag = 0, 4 do
         local numSlots = C_Container.GetContainerNumSlots(bag)
         for slot = 1, numSlots do
             local info = C_Container.GetContainerItemInfo(bag, slot)
             if info and info.itemID then
-                local key = bag .. "-" .. slot
-                currentBagState[key] = info.itemID
+                local key = bag * 100 + slot -- Plus rapide que concaténation string
+                local itemID = info.itemID
+                currentBagState[key] = itemID
                 
                 -- Check if this is a new item
-                if not self.lastBagState[key] or self.lastBagState[key] ~= info.itemID then
+                if lastState[key] ~= itemID then
                     -- New item detected
-                    if self:IsContainerItem(info.itemID) and not self.pendingItems[info.itemID] then
-                        self:Debug("Nouvel item détecté: " .. info.itemID)
-                        self:QueueItem(info.itemID, info.hyperlink)
+                    if not pendingItems[itemID] and self:IsContainerItem(itemID) then
+                        self:Debug("Nouvel item détecté: " .. itemID)
+                        self:QueueItem(itemID, info.hyperlink)
                     end
                 end
             end
