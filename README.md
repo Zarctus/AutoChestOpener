@@ -1,12 +1,12 @@
 # Auto Chest Opener
 
-![Version](https://img.shields.io/badge/version-1.0.0-blue)
+![Version](https://img.shields.io/badge/version-1.2.0-blue)
 ![WoW Version](https://img.shields.io/badge/WoW-12.0.0-orange)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
 ## Description
 
-**Auto Chest Opener** est un addon élégant et moderne pour World of Warcraft qui ouvre automatiquement vos coffres, sacs et conteneurs 3 secondes après les avoir reçus dans votre inventaire.
+**Auto Chest Opener** est un addon élégant et moderne pour World of Warcraft qui ouvre automatiquement vos coffres, sacs et conteneurs après les avoir reçus dans votre inventaire.
 
 ## Fonctionnalités
 
@@ -14,10 +14,14 @@
 - ⏱️ **Délai personnalisable** (0 à 10 secondes)
 - 🖱️ **Glisser-déposer** pour ajouter des items
 - 🔢 **Ajout par ID** d'item
-- 🎨 **Interface moderne** inspirée de la nouvelle UI de WoW
+- 🎨 **Interface moderne** avec système d'onglets
+- 📊 **Statistiques détaillées** (total ouvert, top items, timestamps)
+- � **Tracking de l'or** gagné (total et par session)
+- 📜 **Historique** des 50 dernières ouvertures avec or gagné
 - 📍 **Bouton minimap** avec clic gauche/droit
 - 🔊 **Notifications sonores** optionnelles
 - 💬 **Notifications dans le chat** optionnelles
+- 📤 **Import/Export** de listes de conteneurs
 
 ## Installation
 
@@ -45,8 +49,15 @@
 | `/aco add <itemID>` | Ajoute un conteneur par ID |
 | `/aco remove <itemID>` | Retire un conteneur |
 | `/aco list` | Liste tous les conteneurs |
+| `/aco openall` | Ouvre tous les conteneurs maintenant |
 | `/aco toggle` | Active/Désactive l'addon |
 | `/aco delay <sec>` | Change le délai (0-30s) |
+| `/aco stats` | Affiche les statistiques |
+| `/aco history` | Affiche l'historique récent |
+| `/aco clearstats` | Réinitialise les statistiques |
+| `/aco clearhistory` | Efface l'historique |
+| `/aco export` | Exporte la liste |
+| `/aco import` | Importe une liste |
 | `/aco debug` | Mode debug |
 
 ### Bouton Minimap
@@ -100,6 +111,23 @@
 - Normal ! L'addon attend la fin du combat pour ouvrir les items
 
 ## Changelog
+
+### Version 1.2.0
+- ✨ **Nouveau:** Onglet Statistiques avec compteurs détaillés
+- ✨ **Nouveau:** Onglet Historique des 50 dernières ouvertures
+- ✨ **Nouveau:** Top 5 des items les plus ouverts
+- ✨ **Nouveau:** Commandes `/aco stats` et `/aco history`
+- ✨ **Nouveau:** Boutons réinitialisation stats/historique
+- 💰 **Nouveau:** Tracking de l'or gagné (total et par session)
+- 💰 **Nouveau:** Affichage de l'or dans l'historique
+- 🎨 Interface avec système d'onglets (Conteneurs, Stats, Historique)
+- ⚡ Optimisations de performance (upvalues locales, cache)
+- 🌐 Support multi-langues étendu (russe, coréen)
+
+### Version 1.1.0
+- ⚡ Optimisations de performance
+- 🔧 Cache des items conteneurs
+- 📦 Import/Export de listes
 
 ### Version 1.0.0
 - Première version

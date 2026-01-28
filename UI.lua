@@ -1,7 +1,7 @@
 --[[
     Auto Chest Opener - UI Module
     Modern and elegant interface inspired by WoW's new UI style
-    Version: 1.1.0
+    Version: 1.2.0
 ]]
 
 local addonName, ACO = ...
@@ -15,6 +15,7 @@ local tonumber, tostring = tonumber, tostring
 local format = string.format
 local floor, max, min, cos, sin, atan2, deg = math.floor, math.max, math.min, math.cos, math.sin, math.atan2, math.deg
 local tinsert, wipe = table.insert, wipe
+local date = date
 
 -- WoW API upvalues
 local CreateFrame = CreateFrame
@@ -37,13 +38,14 @@ local UI = ACO.UI
 -- UI CONSTANTS
 -- ============================================================================
 
-local FRAME_WIDTH = 450
-local FRAME_HEIGHT = 550
-local FRAME_MIN_WIDTH = 380
-local FRAME_MIN_HEIGHT = 450
-local FRAME_MAX_WIDTH = 700
-local FRAME_MAX_HEIGHT = 900
+local FRAME_WIDTH = 500
+local FRAME_HEIGHT = 600
+local FRAME_MIN_WIDTH = 420
+local FRAME_MIN_HEIGHT = 500
+local FRAME_MAX_WIDTH = 750
+local FRAME_MAX_HEIGHT = 950
 local HEADER_HEIGHT = 50
+local TAB_HEIGHT = 32
 local BUTTON_HEIGHT = 32
 local LIST_ITEM_HEIGHT = 40
 local PADDING = 12
@@ -501,13 +503,136 @@ function ACO:InitUI()
     end)
     
     -- ========================================================================
-    -- OPTIONS SECTION
+    -- TAB SYSTEM
     -- ========================================================================
     
-    local OptionsSection = CreateFrame("Frame", nil, MainFrame, "BackdropTemplate")
+    local TabContainer = CreateFrame("Frame", nil, MainFrame, "BackdropTemplate")
+    TabContainer:SetHeight(TAB_HEIGHT + 4)
+    TabContainer:SetPoint("TOPLEFT", Header, "BOTTOMLEFT", 1, 0)
+    TabContainer:SetPoint("TOPRIGHT", Header, "BOTTOMRIGHT", -1, 0)
+    TabContainer:SetBackdrop(CardBackdrop)
+    TabContainer:SetBackdropColor(c.background.r, c.background.g, c.background.b, 0.9)
+    TabContainer:SetBackdropBorderColor(c.primary.r * 0.3, c.primary.g * 0.3, c.primary.b * 0.3, 0.5)
+    
+    -- Content frames for each tab
+    local ContainersContent = CreateFrame("Frame", nil, MainFrame)
+    ContainersContent:SetPoint("TOPLEFT", TabContainer, "BOTTOMLEFT", 0, 0)
+    ContainersContent:SetPoint("BOTTOMRIGHT", MainFrame, "BOTTOMRIGHT", 0, 0)
+    
+    local StatsContent = CreateFrame("Frame", nil, MainFrame)
+    StatsContent:SetPoint("TOPLEFT", TabContainer, "BOTTOMLEFT", 0, 0)
+    StatsContent:SetPoint("BOTTOMRIGHT", MainFrame, "BOTTOMRIGHT", 0, 0)
+    StatsContent:Hide()
+    
+    local HistoryContent = CreateFrame("Frame", nil, MainFrame)
+    HistoryContent:SetPoint("TOPLEFT", TabContainer, "BOTTOMLEFT", 0, 0)
+    HistoryContent:SetPoint("BOTTOMRIGHT", MainFrame, "BOTTOMRIGHT", 0, 0)
+    HistoryContent:Hide()
+    
+    UI.tabs = {}
+    UI.currentTab = "containers"
+    
+    local function CreateTab(parent, text, icon, tabKey, xOffset)
+        local tab = CreateFrame("Button", nil, parent, "BackdropTemplate")
+        tab:SetSize(130, TAB_HEIGHT)
+        tab:SetPoint("LEFT", xOffset, 0)
+        tab:SetBackdrop(CardBackdrop)
+        
+        local tabIcon = tab:CreateTexture(nil, "ARTWORK")
+        tabIcon:SetSize(14, 14)
+        tabIcon:SetPoint("LEFT", 10, 0)
+        tabIcon:SetAtlas(icon)
+        
+        local tabText = tab:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        tabText:SetPoint("LEFT", tabIcon, "RIGHT", 6, 0)
+        tabText:SetText(text)
+        
+        tab.isActive = false
+        tab.tabKey = tabKey
+        
+        local function UpdateTabAppearance()
+            if tab.isActive then
+                tab:SetBackdropColor(c.primary.r * 0.3, c.primary.g * 0.3, c.primary.b * 0.3, 1)
+                tab:SetBackdropBorderColor(c.primary.r, c.primary.g, c.primary.b, 1)
+                tabText:SetTextColor(1, 1, 1)
+                tabIcon:SetVertexColor(c.primary.r, c.primary.g, c.primary.b)
+            else
+                tab:SetBackdropColor(c.backgroundLight.r, c.backgroundLight.g, c.backgroundLight.b, 0.5)
+                tab:SetBackdropBorderColor(c.primary.r * 0.3, c.primary.g * 0.3, c.primary.b * 0.3, 0.5)
+                tabText:SetTextColor(c.textDim.r, c.textDim.g, c.textDim.b)
+                tabIcon:SetVertexColor(c.textDim.r, c.textDim.g, c.textDim.b)
+            end
+        end
+        
+        tab:SetScript("OnEnter", function(self)
+            if not self.isActive then
+                self:SetBackdropColor(c.primary.r * 0.2, c.primary.g * 0.2, c.primary.b * 0.2, 0.8)
+                tabText:SetTextColor(c.text.r, c.text.g, c.text.b)
+            end
+        end)
+        
+        tab:SetScript("OnLeave", function(self)
+            UpdateTabAppearance()
+        end)
+        
+        tab:SetScript("OnClick", function(self)
+            UI:SwitchTab(self.tabKey)
+            PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
+        end)
+        
+        tab.UpdateAppearance = UpdateTabAppearance
+        UI.tabs[tabKey] = tab
+        
+        return tab
+    end
+    
+    local containersTab = CreateTab(TabContainer, "Conteneurs", "VignetteLootChest", "containers", PADDING)
+    local statsTab = CreateTab(TabContainer, "Statistiques", "poi-workorders", "stats", PADDING + 134)
+    local historyTab = CreateTab(TabContainer, "Historique", "communities-icon-clock", "history", PADDING + 268)
+    
+    function UI:SwitchTab(tabKey)
+        self.currentTab = tabKey
+        
+        -- Hide all content
+        ContainersContent:Hide()
+        StatsContent:Hide()
+        HistoryContent:Hide()
+        
+        -- Deactivate all tabs
+        for _, tab in pairs(self.tabs) do
+            tab.isActive = false
+            tab:UpdateAppearance()
+        end
+        
+        -- Activate selected tab
+        self.tabs[tabKey].isActive = true
+        self.tabs[tabKey]:UpdateAppearance()
+        
+        -- Show corresponding content
+        if tabKey == "containers" then
+            ContainersContent:Show()
+            self:RefreshList()
+        elseif tabKey == "stats" then
+            StatsContent:Show()
+            self:RefreshStats()
+        elseif tabKey == "history" then
+            HistoryContent:Show()
+            self:RefreshHistory()
+        end
+    end
+    
+    -- Initialize first tab as active
+    containersTab.isActive = true
+    containersTab:UpdateAppearance()
+    
+    -- ========================================================================
+    -- OPTIONS SECTION (inside ContainersContent)
+    -- ========================================================================
+    
+    local OptionsSection = CreateFrame("Frame", nil, ContainersContent, "BackdropTemplate")
     OptionsSection:SetHeight(140)
-    OptionsSection:SetPoint("TOPLEFT", Header, "BOTTOMLEFT", PADDING, -PADDING)
-    OptionsSection:SetPoint("TOPRIGHT", Header, "BOTTOMRIGHT", -PADDING, -PADDING)
+    OptionsSection:SetPoint("TOPLEFT", PADDING, -PADDING)
+    OptionsSection:SetPoint("TOPRIGHT", -PADDING, -PADDING)
     OptionsSection:SetBackdrop(CardBackdrop)
     OptionsSection:SetBackdropColor(c.backgroundLight.r, c.backgroundLight.g, c.backgroundLight.b, 0.5)
     OptionsSection:SetBackdropBorderColor(c.primary.r * 0.3, c.primary.g * 0.3, c.primary.b * 0.3, 0.5)
@@ -579,10 +704,10 @@ function ACO:InitUI()
     end)
     
     -- ========================================================================
-    -- ADD ITEM SECTION
+    -- ADD ITEM SECTION (inside ContainersContent)
     -- ========================================================================
     
-    local AddSection = CreateFrame("Frame", nil, MainFrame, "BackdropTemplate")
+    local AddSection = CreateFrame("Frame", nil, ContainersContent, "BackdropTemplate")
     AddSection:SetHeight(90)
     AddSection:SetPoint("TOPLEFT", OptionsSection, "BOTTOMLEFT", 0, -PADDING)
     AddSection:SetPoint("TOPRIGHT", OptionsSection, "BOTTOMRIGHT", 0, -PADDING)
@@ -708,14 +833,14 @@ function ACO:InitUI()
     end)
     
     -- ========================================================================
-    -- CONTAINER LIST SECTION
+    -- CONTAINER LIST SECTION (inside ContainersContent)
     -- ========================================================================
     
-    local ListSection = CreateFrame("Frame", nil, MainFrame, "BackdropTemplate")
+    local ListSection = CreateFrame("Frame", nil, ContainersContent, "BackdropTemplate")
     ListSection:SetPoint("TOPLEFT", AddSection, "BOTTOMLEFT", 0, -PADDING)
     ListSection:SetPoint("TOPRIGHT", AddSection, "BOTTOMRIGHT", 0, -PADDING)
-    ListSection:SetPoint("BOTTOMLEFT", MainFrame, "BOTTOMLEFT", PADDING, PADDING)
-    ListSection:SetPoint("BOTTOMRIGHT", MainFrame, "BOTTOMRIGHT", -PADDING, PADDING)
+    ListSection:SetPoint("BOTTOMLEFT", ContainersContent, "BOTTOMLEFT", 0, PADDING)
+    ListSection:SetPoint("BOTTOMRIGHT", ContainersContent, "BOTTOMRIGHT", 0, PADDING)
     ListSection:SetBackdrop(CardBackdrop)
     ListSection:SetBackdropColor(c.backgroundLight.r, c.backgroundLight.g, c.backgroundLight.b, 0.5)
     ListSection:SetBackdropBorderColor(c.primary.r * 0.3, c.primary.g * 0.3, c.primary.b * 0.3, 0.5)
@@ -957,6 +1082,339 @@ function ACO:InitUI()
     end
     
     -- ========================================================================
+    -- STATISTICS TAB CONTENT
+    -- ========================================================================
+    
+    local StatsPanel = CreateFrame("Frame", nil, StatsContent, "BackdropTemplate")
+    StatsPanel:SetPoint("TOPLEFT", PADDING, -PADDING)
+    StatsPanel:SetPoint("BOTTOMRIGHT", -PADDING, PADDING)
+    StatsPanel:SetBackdrop(CardBackdrop)
+    StatsPanel:SetBackdropColor(c.backgroundLight.r, c.backgroundLight.g, c.backgroundLight.b, 0.5)
+    StatsPanel:SetBackdropBorderColor(c.primary.r * 0.3, c.primary.g * 0.3, c.primary.b * 0.3, 0.5)
+    
+    -- Stats title
+    local StatsIcon = StatsPanel:CreateTexture(nil, "ARTWORK")
+    StatsIcon:SetSize(20, 20)
+    StatsIcon:SetPoint("TOPLEFT", PADDING, -PADDING)
+    StatsIcon:SetAtlas("poi-workorders")
+    
+    local StatsTitle = StatsPanel:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+    StatsTitle:SetPoint("LEFT", StatsIcon, "RIGHT", 8, 0)
+    StatsTitle:SetText("Statistiques")
+    StatsTitle:SetTextColor(c.primary.r, c.primary.g, c.primary.b)
+    
+    -- Clear Stats Button
+    local ClearStatsBtn = CreateModernButton(StatsPanel, "Réinitialiser", 100, 24, false)
+    ClearStatsBtn:SetPoint("TOPRIGHT", -PADDING, -PADDING)
+    ClearStatsBtn:SetScript("OnClick", function()
+        StaticPopup_Show("ACO_CLEAR_STATS")
+    end)
+    
+    -- Create stat line helper
+    local function CreateStatLine(parent, label, yOffset)
+        local line = CreateFrame("Frame", nil, parent)
+        line:SetHeight(28)
+        line:SetPoint("TOPLEFT", PADDING, yOffset)
+        line:SetPoint("TOPRIGHT", -PADDING, yOffset)
+        
+        local labelText = line:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        labelText:SetPoint("LEFT", 0, 0)
+        labelText:SetText(label)
+        labelText:SetTextColor(c.text.r, c.text.g, c.text.b)
+        
+        local valueText = line:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+        valueText:SetPoint("RIGHT", 0, 0)
+        valueText:SetTextColor(c.accent.r, c.accent.g, c.accent.b)
+        
+        line.value = valueText
+        return line
+    end
+    
+    local statLines = {}
+    statLines.total = CreateStatLine(StatsPanel, "Total ouvert (tous temps):", -50)
+    statLines.session = CreateStatLine(StatsPanel, "Ouvert cette session:", -78)
+    statLines.unique = CreateStatLine(StatsPanel, "Items uniques ouverts:", -106)
+    statLines.totalGold = CreateStatLine(StatsPanel, "Or total gagné:", -134)
+    statLines.sessionGold = CreateStatLine(StatsPanel, "Or cette session:", -162)
+    statLines.firstOpen = CreateStatLine(StatsPanel, "Première ouverture:", -190)
+    statLines.lastOpen = CreateStatLine(StatsPanel, "Dernière ouverture:", -218)
+    
+    -- Top items section
+    local TopItemsTitle = StatsPanel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    TopItemsTitle:SetPoint("TOPLEFT", PADDING, -256)
+    TopItemsTitle:SetText("Top 5 des items les plus ouverts:")
+    TopItemsTitle:SetTextColor(c.secondary.r, c.secondary.g, c.secondary.b)
+    
+    UI.topItemsFrames = {}
+    for i = 1, 5 do
+        local itemFrame = CreateFrame("Frame", nil, StatsPanel, "BackdropTemplate")
+        itemFrame:SetHeight(36)
+        itemFrame:SetPoint("TOPLEFT", PADDING, -276 - (i-1) * 40)
+        itemFrame:SetPoint("TOPRIGHT", -PADDING, -276 - (i-1) * 40)
+        itemFrame:SetBackdrop(CardBackdrop)
+        itemFrame:SetBackdropColor(0.08, 0.08, 0.12, 0.8)
+        itemFrame:SetBackdropBorderColor(c.primary.r * 0.2, c.primary.g * 0.2, c.primary.b * 0.2, 0.5)
+        
+        local rankText = itemFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+        rankText:SetPoint("LEFT", 10, 0)
+        rankText:SetText(format("#%d", i))
+        rankText:SetTextColor(c.accent.r, c.accent.g, c.accent.b)
+        
+        local icon = itemFrame:CreateTexture(nil, "ARTWORK")
+        icon:SetSize(24, 24)
+        icon:SetPoint("LEFT", 45, 0)
+        
+        local nameText = itemFrame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        nameText:SetPoint("LEFT", icon, "RIGHT", 8, 0)
+        nameText:SetWidth(200)
+        nameText:SetJustifyH("LEFT")
+        
+        local countText = itemFrame:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+        countText:SetPoint("RIGHT", -10, 0)
+        countText:SetTextColor(c.success.r, c.success.g, c.success.b)
+        
+        itemFrame.rank = rankText
+        itemFrame.icon = icon
+        itemFrame.name = nameText
+        itemFrame.count = countText
+        itemFrame:Hide()
+        
+        UI.topItemsFrames[i] = itemFrame
+    end
+    
+    UI.statLines = statLines
+    
+    function UI:RefreshStats()
+        local stats = ACO:GetStats()
+        
+        self.statLines.total.value:SetText(format("|cff00ff00%d|r", stats.totalOpened))
+        self.statLines.session.value:SetText(format("|cff00ccff%d|r", stats.sessionOpened))
+        self.statLines.unique.value:SetText(format("|cffffff00%d|r", stats.uniqueItems))
+        self.statLines.totalGold.value:SetText(ACO:FormatMoney(stats.totalGold))
+        self.statLines.sessionGold.value:SetText(ACO:FormatMoney(stats.sessionGold))
+        self.statLines.firstOpen.value:SetText(ACO:FormatTimestamp(stats.firstOpen))
+        self.statLines.lastOpen.value:SetText(ACO:FormatRelativeTime(stats.lastOpen))
+        
+        -- Update top items
+        for i, frame in ipairs(self.topItemsFrames) do
+            local item = stats.topItems[i]
+            if item then
+                frame:Show()
+                frame.count:SetText(format("x%d", item.count))
+                
+                -- Load item info
+                local itemInfo = C_Item.GetItemInfo(item.itemID)
+                local itemIcon = C_Item.GetItemIconByID(item.itemID)
+                
+                if itemInfo then
+                    frame.name:SetText(itemInfo)
+                else
+                    frame.name:SetText("|cff888888Chargement...|r")
+                    local itemObj = Item:CreateFromItemID(item.itemID)
+                    itemObj:ContinueOnItemLoad(function()
+                        local loadedName = C_Item.GetItemInfo(item.itemID)
+                        if loadedName then
+                            frame.name:SetText(loadedName)
+                        end
+                    end)
+                end
+                
+                if itemIcon then
+                    frame.icon:SetTexture(itemIcon)
+                else
+                    frame.icon:SetTexture("Interface\\Icons\\INV_Misc_QuestionMark")
+                end
+            else
+                frame:Hide()
+            end
+        end
+    end
+    
+    -- ========================================================================
+    -- HISTORY TAB CONTENT
+    -- ========================================================================
+    
+    local HistoryPanel = CreateFrame("Frame", nil, HistoryContent, "BackdropTemplate")
+    HistoryPanel:SetPoint("TOPLEFT", PADDING, -PADDING)
+    HistoryPanel:SetPoint("BOTTOMRIGHT", -PADDING, PADDING)
+    HistoryPanel:SetBackdrop(CardBackdrop)
+    HistoryPanel:SetBackdropColor(c.backgroundLight.r, c.backgroundLight.g, c.backgroundLight.b, 0.5)
+    HistoryPanel:SetBackdropBorderColor(c.primary.r * 0.3, c.primary.g * 0.3, c.primary.b * 0.3, 0.5)
+    
+    -- History title
+    local HistoryIcon = HistoryPanel:CreateTexture(nil, "ARTWORK")
+    HistoryIcon:SetSize(20, 20)
+    HistoryIcon:SetPoint("TOPLEFT", PADDING, -PADDING)
+    HistoryIcon:SetAtlas("communities-icon-clock")
+    
+    local HistoryTitle = HistoryPanel:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+    HistoryTitle:SetPoint("LEFT", HistoryIcon, "RIGHT", 8, 0)
+    HistoryTitle:SetText("Historique des ouvertures")
+    HistoryTitle:SetTextColor(c.primary.r, c.primary.g, c.primary.b)
+    
+    -- Clear History Button
+    local ClearHistoryBtn = CreateModernButton(HistoryPanel, "Effacer", 80, 24, false)
+    ClearHistoryBtn:SetPoint("TOPRIGHT", -PADDING, -PADDING)
+    ClearHistoryBtn:SetScript("OnClick", function()
+        StaticPopup_Show("ACO_CLEAR_HISTORY")
+    end)
+    
+    -- History scroll frame
+    local HistoryScrollFrame = CreateFrame("ScrollFrame", nil, HistoryPanel, "UIPanelScrollFrameTemplate")
+    HistoryScrollFrame:SetPoint("TOPLEFT", PADDING, -50)
+    HistoryScrollFrame:SetPoint("BOTTOMRIGHT", -PADDING - 20, PADDING)
+    
+    local HistoryScrollChild = CreateFrame("Frame", nil, HistoryScrollFrame)
+    HistoryScrollChild:SetSize(HistoryScrollFrame:GetWidth(), 1)
+    HistoryScrollFrame:SetScrollChild(HistoryScrollChild)
+    
+    UI.historyItems = {}
+    
+    local function CreateHistoryItem(entry, index)
+        local item = CreateFrame("Frame", nil, HistoryScrollChild, "BackdropTemplate")
+        item:SetSize(HistoryScrollFrame:GetWidth() - 10, 44)
+        item:SetPoint("TOPLEFT", 0, -(index - 1) * 48)
+        item:SetBackdrop(CardBackdrop)
+        item:SetBackdropColor(0.08, 0.08, 0.12, 0.8)
+        item:SetBackdropBorderColor(c.primary.r * 0.2, c.primary.g * 0.2, c.primary.b * 0.2, 0.5)
+        
+        -- Time
+        local timeText = item:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        timeText:SetPoint("TOPLEFT", 10, -6)
+        timeText:SetText(ACO:FormatRelativeTime(entry.timestamp))
+        timeText:SetTextColor(c.textDim.r, c.textDim.g, c.textDim.b)
+        
+        -- Full date on second line
+        local dateText = item:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        dateText:SetPoint("TOPLEFT", 10, -20)
+        dateText:SetText(date("%d/%m/%Y %H:%M", entry.timestamp))
+        dateText:SetTextColor(c.textDim.r * 0.7, c.textDim.g * 0.7, c.textDim.b * 0.7)
+        
+        -- Icon
+        local icon = item:CreateTexture(nil, "ARTWORK")
+        icon:SetSize(28, 28)
+        icon:SetPoint("LEFT", 100, 0)
+        if entry.itemIcon then
+            icon:SetTexture(entry.itemIcon)
+        else
+            local itemIcon = C_Item.GetItemIconByID(entry.itemID)
+            icon:SetTexture(itemIcon or "Interface\\Icons\\INV_Misc_QuestionMark")
+        end
+        
+        -- Item name
+        local nameText = item:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        nameText:SetPoint("LEFT", icon, "RIGHT", 10, 6)
+        nameText:SetWidth(200)
+        nameText:SetJustifyH("LEFT")
+        
+        local itemInfo = C_Item.GetItemInfo(entry.itemID)
+        if itemInfo then
+            nameText:SetText(itemInfo)
+        else
+            nameText:SetText(entry.itemName or "|cff888888Chargement...|r")
+            local itemObj = Item:CreateFromItemID(entry.itemID)
+            itemObj:ContinueOnItemLoad(function()
+                local loadedName = C_Item.GetItemInfo(entry.itemID)
+                if loadedName then
+                    nameText:SetText(loadedName)
+                end
+            end)
+        end
+        
+        -- Gold gained (if any)
+        if entry.goldGained and entry.goldGained > 0 then
+            local goldText = item:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+            goldText:SetPoint("LEFT", icon, "RIGHT", 10, -8)
+            goldText:SetText(ACO:FormatMoney(entry.goldGained))
+        end
+        
+        -- Hover
+        item:SetScript("OnEnter", function(self)
+            self:SetBackdropColor(0.12, 0.12, 0.18, 1)
+            GameTooltip:SetOwner(self, "ANCHOR_CURSOR")
+            GameTooltip:SetHyperlink("item:" .. entry.itemID)
+            if entry.goldGained and entry.goldGained > 0 then
+                GameTooltip:AddLine(" ")
+                GameTooltip:AddLine("Or obtenu: " .. ACO:FormatMoneyShort(entry.goldGained), 1, 0.84, 0)
+            end
+            GameTooltip:Show()
+        end)
+        
+        item:SetScript("OnLeave", function(self)
+            self:SetBackdropColor(0.08, 0.08, 0.12, 0.8)
+            GameTooltip:Hide()
+        end)
+        
+        return item
+    end
+    
+    function UI:RefreshHistory()
+        -- Clear existing items
+        for _, item in ipairs(self.historyItems) do
+            item:Hide()
+            item:SetParent(nil)
+        end
+        wipe(self.historyItems)
+        
+        -- Get history
+        local history = ACO:GetHistory(50)
+        
+        if #history == 0 then
+            -- Show empty message
+            if not self.historyEmptyText then
+                self.historyEmptyText = HistoryScrollChild:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+                self.historyEmptyText:SetPoint("CENTER", 0, 50)
+                self.historyEmptyText:SetText("|cff666666Aucune ouverture enregistrée|r")
+            end
+            self.historyEmptyText:Show()
+            HistoryScrollChild:SetHeight(100)
+        else
+            if self.historyEmptyText then
+                self.historyEmptyText:Hide()
+            end
+            
+            -- Create history items
+            for i, entry in ipairs(history) do
+                local historyItem = CreateHistoryItem(entry, i)
+                tinsert(self.historyItems, historyItem)
+            end
+            
+            -- Update scroll child height
+            HistoryScrollChild:SetHeight(max(1, #history * 48))
+        end
+    end
+    
+    -- ========================================================================
+    -- CONFIRMATION POPUPS
+    -- ========================================================================
+    
+    StaticPopupDialogs["ACO_CLEAR_STATS"] = {
+        text = "Voulez-vous réinitialiser toutes les statistiques ?",
+        button1 = "Oui",
+        button2 = "Non",
+        OnAccept = function()
+            ACO:ClearStats()
+        end,
+        timeout = 0,
+        whileDead = true,
+        hideOnEscape = true,
+        preferredIndex = 3,
+    }
+    
+    StaticPopupDialogs["ACO_CLEAR_HISTORY"] = {
+        text = "Voulez-vous effacer tout l'historique ?",
+        button1 = "Oui",
+        button2 = "Non",
+        OnAccept = function()
+            ACO:ClearHistory()
+        end,
+        timeout = 0,
+        whileDead = true,
+        hideOnEscape = true,
+        preferredIndex = 3,
+    }
+    
+    -- ========================================================================
     -- TOGGLE FUNCTION
     -- ========================================================================
     
@@ -967,14 +1425,14 @@ function ACO:InitUI()
         else
             MainFrame:Show()
             PlaySound(SOUNDKIT.IG_MAINMENU_OPEN)
-            self:RefreshList()
+            self:SwitchTab(self.currentTab or "containers")
         end
     end
     
     function UI:Show()
         MainFrame:Show()
         PlaySound(SOUNDKIT.IG_MAINMENU_OPEN)
-        self:RefreshList()
+        self:SwitchTab(self.currentTab or "containers")
     end
     
     function UI:Hide()

@@ -1,7 +1,7 @@
 --[[
     Auto Chest Opener - Core Module
     Automatically opens chests, bags and containers after receiving them
-    Version: 1.1.0
+    Version: 1.2.0
 ]]
 
 local addonName, ACO = ...
@@ -15,6 +15,7 @@ local tonumber, tostring = tonumber, tostring
 local format, lower, match, gmatch = string.format, string.lower, string.match, string.gmatch
 local tinsert, tremove, wipe = table.insert, table.remove, wipe
 local floor, max, min = math.floor, math.max, math.min
+local time, date = time, date
 
 -- WoW API upvalues
 local C_Container = C_Container
@@ -27,15 +28,22 @@ local GetCursorInfo = GetCursorInfo
 local ClearCursor = ClearCursor
 local CopyTable = CopyTable
 local strsplit = strsplit
+local GetMoney = GetMoney
+local UnitName = UnitName
 
 -- ============================================================================
 -- ADDON INITIALIZATION
 -- ============================================================================
 
 ACO.name = addonName
-ACO.version = "1.1.0"
+ACO.version = "1.2.0"
 ACO.pendingItems = {}
 ACO.itemQueue = {}
+ACO.goldTracker = {
+    isTracking = false,
+    goldBefore = 0,
+    pendingItemID = nil,
+}
 
 -- Default settings
 local defaults = {
@@ -49,6 +57,19 @@ local defaults = {
     minimap = {
         hide = false,
     },
+    -- Statistics
+    stats = {
+        totalOpened = 0,            -- Total containers opened
+        totalOpenedSession = 0,     -- Session counter (reset on login)
+        itemsOpened = {},           -- {[itemID] = count}
+        firstOpen = nil,            -- Timestamp of first ever open
+        lastOpen = nil,             -- Timestamp of last open
+        totalGold = 0,              -- Total gold earned (in copper)
+        sessionGold = 0,            -- Session gold earned (in copper)
+    },
+    -- History (last 50 openings)
+    history = {},
+    historyMaxSize = 50,
 }
 
 -- ============================================================================
@@ -177,6 +198,9 @@ function ACO:OpenItem(itemID)
     -- Use the item
     C_Container.UseContainerItem(bag, slot)
     
+    -- Record statistics and history
+    self:RecordOpening(itemID)
+    
     if self.db.showNotifications then
         local itemLink = self:FormatItemLink(itemID)
         self:Print(format("Ouverture de %s...", itemLink))
@@ -257,6 +281,10 @@ function ACO:OpenAllContainers()
         C_Timer.After((i - 1) * delayBetween, function()
             if not InCombatLockdown() then
                 C_Container.UseContainerItem(data.bag, data.slot)
+                
+                -- Record statistics and history
+                selfRef:RecordOpening(data.itemID)
+                
                 opened = opened + 1
                 if showNotif then
                     selfRef:Print(format("Ouverture de %s (%d/%d)", 
@@ -345,6 +373,263 @@ function ACO:RemoveFromBlacklist(itemID)
     self:Print(string.format("Retiré de la blacklist: %s", itemLink))
     
     return true
+end
+
+-- ============================================================================
+-- STATISTICS & HISTORY
+-- ============================================================================
+
+-- Record an opening event
+function ACO:RecordOpening(itemID)
+    if not self.db or not itemID then return end
+    
+    local stats = self.db.stats
+    local currentTime = time()
+    
+    -- Update counters
+    stats.totalOpened = (stats.totalOpened or 0) + 1
+    stats.totalOpenedSession = (stats.totalOpenedSession or 0) + 1
+    
+    -- Track per-item stats
+    stats.itemsOpened = stats.itemsOpened or {}
+    stats.itemsOpened[itemID] = (stats.itemsOpened[itemID] or 0) + 1
+    
+    -- Update timestamps
+    if not stats.firstOpen then
+        stats.firstOpen = currentTime
+    end
+    stats.lastOpen = currentTime
+    
+    -- Start gold tracking
+    self:StartGoldTracking(itemID)
+    
+    -- Add to history (gold will be updated later)
+    self:AddToHistory(itemID, currentTime)
+    
+    -- Refresh UI if stats tab is visible
+    if self.UI and self.UI.RefreshStats then
+        self.UI:RefreshStats()
+    end
+end
+
+-- Start tracking gold before container opens
+function ACO:StartGoldTracking(itemID)
+    self.goldTracker.isTracking = true
+    self.goldTracker.goldBefore = GetMoney()
+    self.goldTracker.pendingItemID = itemID
+    self.goldTracker.startTime = time()
+    
+    -- Check for gold change after a short delay (loot processing time)
+    C_Timer.After(0.5, function()
+        self:CheckGoldGained()
+    end)
+end
+
+-- Check if gold was gained from container
+function ACO:CheckGoldGained()
+    if not self.goldTracker.isTracking then return end
+    
+    local goldAfter = GetMoney()
+    local goldGained = goldAfter - self.goldTracker.goldBefore
+    
+    if goldGained > 0 then
+        local stats = self.db.stats
+        stats.totalGold = (stats.totalGold or 0) + goldGained
+        stats.sessionGold = (stats.sessionGold or 0) + goldGained
+        
+        -- Update the most recent history entry with gold info
+        if self.db.history and #self.db.history > 0 then
+            self.db.history[1].goldGained = goldGained
+        end
+        
+        self:Debug(format("Or gagn\195\169: %s", self:FormatMoney(goldGained)))
+        
+        -- Refresh UI
+        if self.UI and self.UI.RefreshStats then
+            self.UI:RefreshStats()
+        end
+        if self.UI and self.UI.RefreshHistory then
+            self.UI:RefreshHistory()
+        end
+    end
+    
+    self.goldTracker.isTracking = false
+    self.goldTracker.pendingItemID = nil
+end
+
+-- Format money (copper) to gold/silver/copper string
+function ACO:FormatMoney(copper)
+    if not copper or copper == 0 then return "0" end
+    
+    local gold = floor(copper / 10000)
+    local silver = floor((copper % 10000) / 100)
+    local copperRem = copper % 100
+    
+    local result = ""
+    if gold > 0 then
+        result = format("|cffffd700%d|r|TInterface\\MoneyFrame\\UI-GoldIcon:0|t ", gold)
+    end
+    if silver > 0 or gold > 0 then
+        result = result .. format("|cffc7c7cf%d|r|TInterface\\MoneyFrame\\UI-SilverIcon:0|t ", silver)
+    end
+    result = result .. format("|cffeda55f%d|r|TInterface\\MoneyFrame\\UI-CopperIcon:0|t", copperRem)
+    
+    return result
+end
+
+-- Format money short (just numbers)
+function ACO:FormatMoneyShort(copper)
+    if not copper or copper == 0 then return "0g" end
+    
+    local gold = floor(copper / 10000)
+    local silver = floor((copper % 10000) / 100)
+    
+    if gold > 0 then
+        if silver > 0 then
+            return format("%dg %ds", gold, silver)
+        end
+        return format("%dg", gold)
+    elseif silver > 0 then
+        return format("%ds", silver)
+    else
+        return format("%dc", copper)
+    end
+end
+
+-- Add entry to history (FIFO, max 50 entries)
+function ACO:AddToHistory(itemID, timestamp)
+    local history = self.db.history
+    local maxSize = self.db.historyMaxSize or 50
+    
+    -- Get item info
+    local itemName, itemLink = C_Item.GetItemInfo(itemID)
+    local itemIcon = C_Item.GetItemIconByID(itemID)
+    
+    -- Create history entry
+    local entry = {
+        itemID = itemID,
+        itemName = itemName or "Unknown",
+        itemIcon = itemIcon,
+        timestamp = timestamp,
+        character = UnitName("player"),
+        goldGained = 0, -- Will be updated by CheckGoldGained
+    }
+    
+    -- Insert at beginning (most recent first)
+    tinsert(history, 1, entry)
+    
+    -- Trim to max size
+    while #history > maxSize do
+        tremove(history)
+    end
+end
+
+-- Get formatted statistics
+function ACO:GetStats()
+    local stats = self.db.stats
+    return {
+        totalOpened = stats.totalOpened or 0,
+        sessionOpened = stats.totalOpenedSession or 0,
+        uniqueItems = self:CountTable(stats.itemsOpened or {}),
+        firstOpen = stats.firstOpen,
+        lastOpen = stats.lastOpen,
+        topItems = self:GetTopOpenedItems(5),
+        totalGold = stats.totalGold or 0,
+        sessionGold = stats.sessionGold or 0,
+    }
+end
+
+-- Count entries in a table
+function ACO:CountTable(t)
+    local count = 0
+    for _ in pairs(t) do
+        count = count + 1
+    end
+    return count
+end
+
+-- Get top N most opened items
+function ACO:GetTopOpenedItems(n)
+    local items = {}
+    local itemsOpened = self.db.stats.itemsOpened or {}
+    
+    for itemID, count in pairs(itemsOpened) do
+        tinsert(items, {itemID = itemID, count = count})
+    end
+    
+    -- Sort by count descending
+    table.sort(items, function(a, b) return a.count > b.count end)
+    
+    -- Return top N
+    local result = {}
+    for i = 1, min(n, #items) do
+        result[i] = items[i]
+    end
+    return result
+end
+
+-- Format timestamp to readable date
+function ACO:FormatTimestamp(timestamp)
+    if not timestamp then return "Jamais" end
+    return date("%d/%m/%Y %H:%M", timestamp)
+end
+
+-- Format relative time (e.g., "il y a 5 minutes")
+function ACO:FormatRelativeTime(timestamp)
+    if not timestamp then return "Jamais" end
+    
+    local diff = time() - timestamp
+    
+    if diff < 60 then
+        return "À l'instant"
+    elseif diff < 3600 then
+        local mins = floor(diff / 60)
+        return format("Il y a %d min", mins)
+    elseif diff < 86400 then
+        local hours = floor(diff / 3600)
+        return format("Il y a %dh", hours)
+    else
+        local days = floor(diff / 86400)
+        return format("Il y a %d jour%s", days, days > 1 and "s" or "")
+    end
+end
+
+-- Get history entries
+function ACO:GetHistory(limit)
+    limit = limit or 50
+    local result = {}
+    local history = self.db.history or {}
+    
+    for i = 1, min(limit, #history) do
+        result[i] = history[i]
+    end
+    return result
+end
+
+-- Clear statistics
+function ACO:ClearStats()
+    self.db.stats = {
+        totalOpened = 0,
+        totalOpenedSession = 0,
+        itemsOpened = {},
+        firstOpen = nil,
+        lastOpen = nil,
+        totalGold = 0,
+        sessionGold = 0,
+    }
+    self:Print("Statistiques réinitialisées.")
+    if self.UI and self.UI.RefreshStats then
+        self.UI:RefreshStats()
+    end
+end
+
+-- Clear history
+function ACO:ClearHistory()
+    wipe(self.db.history)
+    self:Print("Historique effacé.")
+    if self.UI and self.UI.RefreshHistory then
+        self.UI:RefreshHistory()
+    end
 end
 
 -- ============================================================================
@@ -497,6 +782,38 @@ SlashCmdList["AUTOCHESTOPENER"] = function(msg)
         if count > 0 then
             ACO:Print(string.format("Ouverture de %d conteneur(s)...", count))
         end
+    elseif cmd == "stats" then
+        local stats = ACO:GetStats()
+        ACO:Print("--- Statistiques ---")
+        print(format("  Total ouvert: |cff00ff00%d|r", stats.totalOpened))
+        print(format("  Cette session: |cff00ccff%d|r", stats.sessionOpened))
+        print(format("  Items uniques: |cffffff00%d|r", stats.uniqueItems))
+        print(format("  Or total gagné: %s", ACO:FormatMoney(stats.totalGold)))
+        print(format("  Or cette session: %s", ACO:FormatMoney(stats.sessionGold)))
+        print(format("  Première ouverture: %s", ACO:FormatTimestamp(stats.firstOpen)))
+        print(format("  Dernière ouverture: %s", ACO:FormatTimestamp(stats.lastOpen)))
+        if #stats.topItems > 0 then
+            print("  Top 5 items:")
+            for i, item in ipairs(stats.topItems) do
+                local link = ACO:FormatItemLink(item.itemID)
+                print(format("    %d. %s (x%d)", i, link, item.count))
+            end
+        end
+    elseif cmd == "history" then
+        local history = ACO:GetHistory(10)
+        if #history == 0 then
+            ACO:Print("Aucun historique.")
+        else
+            ACO:Print("--- Historique récent ---")
+            for i, entry in ipairs(history) do
+                local link = ACO:FormatItemLink(entry.itemID)
+                print(format("  %s - %s", ACO:FormatRelativeTime(entry.timestamp), link))
+            end
+        end
+    elseif cmd == "clearstats" then
+        ACO:ClearStats()
+    elseif cmd == "clearhistory" then
+        ACO:ClearHistory()
     elseif cmd == "" or cmd == "config" or cmd == "options" then
         if ACO.UI and ACO.UI.Toggle then
             ACO.UI:Toggle()
@@ -510,6 +827,10 @@ SlashCmdList["AUTOCHESTOPENER"] = function(msg)
         print("  /aco openall - Ouvrir tous les conteneurs")
         print("  /aco toggle - Activer/Désactiver")
         print("  /aco delay <secondes> - Régler le délai")
+        print("  /aco stats - Afficher les statistiques")
+        print("  /aco history - Afficher l'historique")
+        print("  /aco clearstats - Réinitialiser les stats")
+        print("  /aco clearhistory - Effacer l'historique")
         print("  /aco debug - Mode debug")
     end
 end
