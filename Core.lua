@@ -96,6 +96,19 @@ ACO.SOUNDS = {
 }
 
 -- ============================================================================
+-- ZARCTUS_GOLD INTEGRATION
+-- ============================================================================
+
+-- Notify Zarctus_Gold before opening a chest to avoid double-counting
+function ACO:NotifyZarctusGold(itemID, itemName)
+    if Zarctus_Gold_API and Zarctus_Gold_API.PushChestContext then
+        local name = itemName or ("Container #" .. itemID)
+        Zarctus_Gold_API:PushChestContext(name)
+        self:Debug("Notified Zarctus_Gold: " .. name)
+    end
+end
+
+-- ============================================================================
 -- UTILITY FUNCTIONS
 -- ============================================================================
 
@@ -189,11 +202,15 @@ function ACO:OpenItem(itemID)
         return false
     end
     
-    local bag, slot = self:FindItemInBags(itemID)
+    local bag, slot, info = self:FindItemInBags(itemID)
     if not bag then
         self:Debug("Item not found in bags: " .. itemID)
         return false
     end
+    
+    -- Notify Zarctus_Gold before opening (for proper gold tracking)
+    local itemName = info and info.itemName or nil
+    self:NotifyZarctusGold(itemID, itemName)
     
     -- Use the item
     C_Container.UseContainerItem(bag, slot)
@@ -280,6 +297,10 @@ function ACO:OpenAllContainers()
     for i, data in ipairs(toOpen) do
         C_Timer.After((i - 1) * delayBetween, function()
             if not InCombatLockdown() then
+                -- Notify Zarctus_Gold before opening (for proper gold tracking)
+                local itemName = data.link and data.link:match("%[(.-)%]") or nil
+                selfRef:NotifyZarctusGold(data.itemID, itemName)
+                
                 C_Container.UseContainerItem(data.bag, data.slot)
                 
                 -- Record statistics and history

@@ -13,7 +13,7 @@
 ## X-Curse-Project-ID: 
 ## X-WoWI-ID: 
 
-## OptionalDeps: ElvUI
+## OptionalDeps: ElvUI, Zarctus_Gold
 
 Libs\LibStub\LibStub.lua
 
