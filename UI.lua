@@ -1,7 +1,7 @@
 --[[
     Auto Chest Opener - UI Module
     Modern and elegant interface inspired by WoW's new UI style
-    Version: 1.2.0
+    Version: 1.3.0
 ]]
 
 local addonName, ACO = ...

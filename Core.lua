@@ -1,7 +1,7 @@
 --[[
     Auto Chest Opener - Core Module
     Automatically opens chests, bags and containers after receiving them
-    Version: 1.2.0
+    Version: 1.3.0
 ]]
 
 local addonName, ACO = ...
@@ -36,7 +36,7 @@ local UnitName = UnitName
 -- ============================================================================
 
 ACO.name = addonName
-ACO.version = "1.2.0"
+ACO.version = "1.3.0"
 ACO.pendingItems = {}
 ACO.itemQueue = {}
 ACO.goldTracker = {
@@ -136,7 +136,7 @@ ACO.containerCache = {}
 function ACO:IsContainerItem(itemID)
     if not itemID then return false end
     
-    -- Check user-defined containers (priorité)
+    -- Check user-defined containers (priorité absolue)
     if self.db and self.db.containers[itemID] then
         return true
     end
@@ -151,11 +151,64 @@ function ACO:IsContainerItem(itemID)
     if itemSpell then
         local spellName = lower(itemSpell)
         -- Common opening spell names (multi-language support)
-        local isContainer = spellName == "open" or spellName == "ouvrir" or 
-                           spellName == "öffnen" or spellName == "abrir" or
-                           spellName == "открыть" or spellName == "열기"
+        -- Also check for partial matches (contains) for variations
+        local openKeywords = {
+            "open", "ouvrir", "öffnen", "abrir", "открыть", "열기",
+            "unwrap", "déballer", "auspacken",  -- For wrapped items
+            "use", "utiliser",                   -- Some items use "use"
+            "loot", "piller",                    -- Loot keywords
+            "cache", "coffre", "chest", "crate", -- Container keywords
+            "salvage", "récupérer",              -- Salvage crates
+            "disenchant",                        -- Some containers
+        }
+        local isContainer = false
+        for _, keyword in ipairs(openKeywords) do
+            if spellName == keyword or match(spellName, keyword) then
+                isContainer = true
+                break
+            end
+        end
+        
+        -- If spell found but not matched, check item name for container hints
+        if not isContainer then
+            local itemName = C_Item.GetItemNameByID(itemID)
+            if itemName then
+                local nameLower = lower(itemName)
+                local containerNames = {
+                    "cache", "coffre", "chest", "crate", "sack", "sac",
+                    "bag", "box", "boîte", "bundle", "lot",
+                    "treasure", "trésor", "salvage", "récupération",
+                    "parcel", "colis", "package", "paquet",
+                }
+                for _, keyword in ipairs(containerNames) do
+                    if match(nameLower, keyword) then
+                        isContainer = true
+                        break
+                    end
+                end
+            end
+        end
+        
         self.containerCache[itemID] = isContainer
         return isContainer
+    end
+    
+    -- No spell found - check item name as fallback
+    local itemName = C_Item.GetItemNameByID(itemID)
+    if itemName then
+        local nameLower = lower(itemName)
+        local containerNames = {
+            "cache", "coffre", "chest", "crate", "sack", "sac",
+            "bag", "box", "boîte", "bundle", "lot",
+            "treasure", "trésor", "salvage", "récupération",
+            "parcel", "colis", "package", "paquet",
+        }
+        for _, keyword in ipairs(containerNames) do
+            if match(nameLower, keyword) then
+                self.containerCache[itemID] = true
+                return true
+            end
+        end
     end
     
     self.containerCache[itemID] = false
@@ -336,6 +389,9 @@ function ACO:AddContainer(itemID)
     
     self.db.containers[itemID] = true
     
+    -- Clear cache for this item so it's recognized immediately
+    self.containerCache[itemID] = nil
+    
     local itemLink = self:FormatItemLink(itemID)
     self:Print(string.format("Ajouté: %s", itemLink))
     
@@ -348,7 +404,37 @@ function ACO:AddContainer(itemID)
         ACO.UI:RefreshList()
     end
     
+    -- Auto-queue existing items of this type in bags (if enabled)
+    if self.db.enabled then
+        self:QueueExistingContainers(itemID)
+    end
+    
     return true
+end
+
+-- Queue all existing containers of a specific itemID in bags for opening
+function ACO:QueueExistingContainers(itemID)
+    if not itemID then return 0 end
+    
+    local count = 0
+    for bag = 0, 4 do
+        local numSlots = C_Container.GetContainerNumSlots(bag)
+        for slot = 1, numSlots do
+            local info = C_Container.GetContainerItemInfo(bag, slot)
+            if info and info.itemID == itemID then
+                if not self.pendingItems[itemID] and self:CanOpenItem(itemID) then
+                    self:QueueItem(itemID, info.hyperlink)
+                    count = count + 1
+                end
+            end
+        end
+    end
+    
+    if count > 0 then
+        self:Debug(format("Trouvé %d item(s) existant(s) pour ID %d", count, itemID))
+    end
+    
+    return count
 end
 
 function ACO:RemoveContainer(itemID)
@@ -689,6 +775,16 @@ events["ADDON_LOADED"] = function(self, addonLoaded)
     end)
 end
 
+events["PLAYER_ENTERING_WORLD"] = function(self, isInitialLogin, isReloadingUi)
+    -- Scan bags after a short delay to ensure everything is loaded
+    C_Timer.After(2, function()
+        if ACO.db and ACO.db.enabled then
+            ACO:Debug("Scan initial des sacs au chargement...")
+            ACO:ScanBagsForContainers()
+        end
+    end)
+end
+
 events["BAG_UPDATE_DELAYED"] = function(self)
     -- Check for new items in bags
     ACO:ScanBagsForContainers()
@@ -713,6 +809,7 @@ function ACO:ScanBagsForContainers()
     local currentBagState = {}
     local lastState = self.lastBagState
     local pendingItems = self.pendingItems
+    local userContainers = self.db.containers
     
     for bag = 0, 4 do
         local numSlots = C_Container.GetContainerNumSlots(bag)
@@ -723,11 +820,18 @@ function ACO:ScanBagsForContainers()
                 local itemID = info.itemID
                 currentBagState[key] = itemID
                 
-                -- Check if this is a new item
-                if lastState[key] ~= itemID then
-                    -- New item detected
-                    if not pendingItems[itemID] and self:IsContainerItem(itemID) then
-                        self:Debug("Nouvel item détecté: " .. itemID)
+                -- Check if this is a new item OR if it's a user-defined container
+                local isNewItem = (lastState[key] ~= itemID)
+                local isUserContainer = userContainers[itemID]
+                
+                if isNewItem or isUserContainer then
+                    -- Queue if not already pending and can be opened
+                    if not pendingItems[itemID] and self:CanOpenItem(itemID) then
+                        if isNewItem then
+                            self:Debug("Nouvel item détecté: " .. itemID)
+                        else
+                            self:Debug("Container utilisateur trouvé: " .. itemID)
+                        end
                         self:QueueItem(itemID, info.hyperlink)
                     end
                 end
@@ -835,6 +939,30 @@ SlashCmdList["AUTOCHESTOPENER"] = function(msg)
         ACO:ClearStats()
     elseif cmd == "clearhistory" then
         ACO:ClearHistory()
+    elseif cmd == "info" and arg then
+        -- Debug command to check item info
+        local itemID = tonumber(arg)
+        if itemID then
+            local itemName = C_Item.GetItemNameByID(itemID)
+            local itemSpell = C_Item.GetItemSpell(itemID)
+            local isContainer = ACO:IsContainerItem(itemID)
+            local canOpen = ACO:CanOpenItem(itemID)
+            local inList = ACO.db.containers[itemID] and "Oui" or "Non"
+            ACO:Print(format("--- Info Item %d ---", itemID))
+            print(format("  Nom: %s", itemName or "Inconnu"))
+            print(format("  Spell: %s", itemSpell or "Aucun"))
+            print(format("  Dans la liste: %s", inList))
+            print(format("  Détecté comme container: %s", isContainer and "Oui" or "Non"))
+            print(format("  Peut être ouvert: %s", canOpen and "Oui" or "Non"))
+        else
+            ACO:Print("Usage: /aco info <itemID>", true)
+        end
+    elseif cmd == "scan" then
+        -- Force a bag scan
+        ACO.containerCache = {} -- Clear cache
+        ACO.lastBagState = {} -- Reset bag state to detect all items as "new"
+        ACO:ScanBagsForContainers()
+        ACO:Print("Scan des sacs effectué!")
     elseif cmd == "" or cmd == "config" or cmd == "options" then
         if ACO.UI and ACO.UI.Toggle then
             ACO.UI:Toggle()
@@ -852,6 +980,8 @@ SlashCmdList["AUTOCHESTOPENER"] = function(msg)
         print("  /aco history - Afficher l'historique")
         print("  /aco clearstats - Réinitialiser les stats")
         print("  /aco clearhistory - Effacer l'historique")
+        print("  /aco info <itemID> - Info sur un item")
+        print("  /aco scan - Forcer un scan des sacs")
         print("  /aco debug - Mode debug")
     end
 end
