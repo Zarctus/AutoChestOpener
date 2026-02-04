@@ -148,24 +148,48 @@ function ACO:IsContainerItem(itemID)
     
     -- Check if item has "Open" as a spell (can be opened)
     local itemSpell = C_Item.GetItemSpell(itemID)
+    local itemName = C_Item.GetItemNameByID(itemID)
+    
+    self:Debug(format("Checking item %d: name='%s', spell='%s'", 
+        itemID, itemName or "nil", itemSpell or "nil"))
+    
     if itemSpell then
         local spellName = lower(itemSpell)
-        -- Common opening spell names (multi-language support)
-        -- Also check for partial matches (contains) for variations
-        local openKeywords = {
-            "open", "ouvrir", "öffnen", "abrir", "открыть", "열기",
-            "unwrap", "déballer", "auspacken",  -- For wrapped items
-            "use", "utiliser",                   -- Some items use "use"
-            "loot", "piller",                    -- Loot keywords
-            "cache", "coffre", "chest", "crate", -- Container keywords
-            "salvage", "récupérer",              -- Salvage crates
-            "disenchant",                        -- Some containers
+        
+        -- Use partial patterns (word roots) to catch all conjugations
+        -- "ouvr" catches: ouvrir, ouvrez, ouvrant, etc.
+        -- "open" catches: open, opens, opening, etc.
+        local openPatterns = {
+            "open",      -- EN: open, opens, opening
+            "ouvr",      -- FR: ouvrir, ouvrez, ouvrant, ouvre
+            "öffn",      -- DE: öffnen, öffnet
+            "abr",       -- ES: abrir, abre
+            "откр",      -- RU: открыть, открывать
+            "열",        -- KR: 열기
         }
+        
         local isContainer = false
-        for _, keyword in ipairs(openKeywords) do
-            if spellName == keyword or match(spellName, keyword) then
+        for _, pattern in ipairs(openPatterns) do
+            if match(spellName, pattern) then
                 isContainer = true
                 break
+            end
+        end
+        
+        -- Additional keyword checks (exact or partial)
+        if not isContainer then
+            local openKeywords = {
+                "unwrap", "déballer", "auspacken",  -- For wrapped items
+                "use", "utiliser", "utilisez",      -- Some items use "use"
+                "loot", "piller",                   -- Loot keywords
+                "salvage", "récupér",               -- Salvage crates
+                "click", "cliqu",                   -- Click to open
+            }
+            for _, keyword in ipairs(openKeywords) do
+                if match(spellName, keyword) then
+                    isContainer = true
+                    break
+                end
             end
         end
         
@@ -179,6 +203,7 @@ function ACO:IsContainerItem(itemID)
                     "bag", "box", "boîte", "bundle", "lot",
                     "treasure", "trésor", "salvage", "récupération",
                     "parcel", "colis", "package", "paquet",
+                    "pouch", "bourse", "purse",  -- Money bags
                 }
                 for _, keyword in ipairs(containerNames) do
                     if match(nameLower, keyword) then
@@ -202,6 +227,7 @@ function ACO:IsContainerItem(itemID)
             "bag", "box", "boîte", "bundle", "lot",
             "treasure", "trésor", "salvage", "récupération",
             "parcel", "colis", "package", "paquet",
+            "pouch", "bourse", "purse",  -- Money bags
         }
         for _, keyword in ipairs(containerNames) do
             if match(nameLower, keyword) then
@@ -283,17 +309,27 @@ function ACO:OpenItem(itemID)
     return true
 end
 
-function ACO:QueueItem(itemID, itemLink)
+-- Track pending slots instead of just itemIDs to support multiple same items
+ACO.pendingSlots = {}
+
+function ACO:QueueItem(itemID, itemLink, bag, slot)
     if not self.db.enabled then return end
-    if not self:CanOpenItem(itemID) then return end
+    if not self:CanOpenItem(itemID) then 
+        self:Debug("CanOpenItem returned false for: " .. itemID)
+        return 
+    end
     
-    -- Don't queue if already pending
-    if self.pendingItems[itemID] then
-        self:Debug("Item already pending: " .. itemID)
+    -- Use bag+slot as unique key if provided, otherwise use itemID
+    local pendingKey = (bag and slot) and (bag .. "_" .. slot) or tostring(itemID)
+    
+    -- Don't queue if this specific slot is already pending
+    if self.pendingSlots[pendingKey] then
+        self:Debug("Slot already pending: " .. pendingKey)
         return
     end
     
-    self.pendingItems[itemID] = true
+    self.pendingSlots[pendingKey] = true
+    self.pendingItems[itemID] = (self.pendingItems[itemID] or 0) + 1
     local delay = self.db.delay
     
     if self.db.showNotifications then
@@ -301,11 +337,34 @@ function ACO:QueueItem(itemID, itemLink)
         self:Print(format("Ouverture de %s dans %d secondes...", link, delay))
     end
     
-    -- Schedule opening avec référence locale pour éviter les closures coûteuses
+    -- Schedule opening
     local selfRef = self
+    local targetBag, targetSlot = bag, slot
     C_Timer.After(delay, function()
-        selfRef.pendingItems[itemID] = nil
+        selfRef.pendingSlots[pendingKey] = nil
+        selfRef.pendingItems[itemID] = (selfRef.pendingItems[itemID] or 1) - 1
+        if selfRef.pendingItems[itemID] <= 0 then
+            selfRef.pendingItems[itemID] = nil
+        end
+        
         if selfRef:CanOpenItem(itemID) then
+            -- Try to open from specific slot first, fallback to any slot with this item
+            if targetBag and targetSlot then
+                local info = C_Container.GetContainerItemInfo(targetBag, targetSlot)
+                if info and info.itemID == itemID then
+                    selfRef:NotifyZarctusGold(itemID, info.itemName)
+                    C_Container.UseContainerItem(targetBag, targetSlot)
+                    selfRef:RecordOpening(itemID)
+                    if selfRef.db.showNotifications then
+                        selfRef:Print(format("Ouverture de %s...", itemLink or selfRef:FormatItemLink(itemID)))
+                    end
+                    if selfRef.db.notificationSound then
+                        PlaySound(selfRef.SOUNDS.OPEN)
+                    end
+                    return
+                end
+            end
+            -- Fallback: find any instance of this item
             selfRef:OpenItem(itemID)
         end
     end)
@@ -808,7 +867,6 @@ function ACO:ScanBagsForContainers()
     
     local currentBagState = {}
     local lastState = self.lastBagState
-    local pendingItems = self.pendingItems
     local userContainers = self.db.containers
     
     for bag = 0, 4 do
@@ -816,23 +874,30 @@ function ACO:ScanBagsForContainers()
         for slot = 1, numSlots do
             local info = C_Container.GetContainerItemInfo(bag, slot)
             if info and info.itemID then
-                local key = bag * 100 + slot -- Plus rapide que concaténation string
+                local key = bag .. "_" .. slot
                 local itemID = info.itemID
                 currentBagState[key] = itemID
                 
-                -- Check if this is a new item OR if it's a user-defined container
-                local isNewItem = (lastState[key] ~= itemID)
-                local isUserContainer = userContainers[itemID]
-                
-                if isNewItem or isUserContainer then
-                    -- Queue if not already pending and can be opened
-                    if not pendingItems[itemID] and self:CanOpenItem(itemID) then
+                -- Check if this specific slot already has a pending open
+                if self.pendingSlots[key] then
+                    -- Already pending, skip
+                elseif self:CanOpenItem(itemID) then
+                    -- Check if this is a new item OR if it's a user-defined container
+                    local isNewItem = (lastState[key] ~= itemID)
+                    local isUserContainer = userContainers[itemID]
+                    local isAutoDetected = self:IsContainerItem(itemID)
+                    
+                    if isNewItem or isUserContainer then
                         if isNewItem then
-                            self:Debug("Nouvel item détecté: " .. itemID)
+                            self:Debug("Nouvel item détecté: " .. itemID .. " at " .. key)
                         else
-                            self:Debug("Container utilisateur trouvé: " .. itemID)
+                            self:Debug("Container utilisateur trouvé: " .. itemID .. " at " .. key)
                         end
-                        self:QueueItem(itemID, info.hyperlink)
+                        self:QueueItem(itemID, info.hyperlink, bag, slot)
+                    elseif isAutoDetected and not lastState[key] then
+                        -- Auto-detected container on first scan
+                        self:Debug("Container auto-détecté: " .. itemID .. " at " .. key)
+                        self:QueueItem(itemID, info.hyperlink, bag, slot)
                     end
                 end
             end
@@ -961,6 +1026,8 @@ SlashCmdList["AUTOCHESTOPENER"] = function(msg)
         -- Force a bag scan
         ACO.containerCache = {} -- Clear cache
         ACO.lastBagState = {} -- Reset bag state to detect all items as "new"
+        ACO.pendingSlots = {} -- Clear pending slots
+        wipe(ACO.pendingItems) -- Clear pending items
         ACO:ScanBagsForContainers()
         ACO:Print("Scan des sacs effectué!")
     elseif cmd == "" or cmd == "config" or cmd == "options" then
