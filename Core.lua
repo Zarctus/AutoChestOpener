@@ -521,6 +521,36 @@ function ACO:RemoveContainer(itemID)
     return true
 end
 
+function ACO:RemoveAllContainers()
+    if not self.db or not self.db.containers then return 0 end
+    
+    local count = 0
+    for itemID in pairs(self.db.containers) do
+        count = count + 1
+    end
+    
+    if count == 0 then
+        self:Print("Aucun conteneur à retirer.")
+        return 0
+    end
+    
+    -- Clear all containers
+    wipe(self.db.containers)
+    
+    self:Print(format("|cffff8800%d conteneur(s) retiré(s).|r", count))
+    
+    if self.db.notificationSound then
+        PlaySound(self.SOUNDS.REMOVE)
+    end
+    
+    -- Refresh UI if open
+    if ACO.UI and ACO.UI.RefreshList then
+        ACO.UI:RefreshList()
+    end
+    
+    return count
+end
+
 function ACO:AddToBlacklist(itemID)
     if not itemID then return false end
     
@@ -824,6 +854,9 @@ events["ADDON_LOADED"] = function(self, addonLoaded)
     
     ACO.db = AutoChestOpenerDB
     
+    -- Initialize bag state immediately to prevent false "new item" detections
+    ACO.bagStateInitialized = false
+    
     ACO:Print("Addon chargé! Tapez |cff00ccff/aco|r pour ouvrir les options.")
     
     -- Initialize UI after a short delay
@@ -835,16 +868,23 @@ events["ADDON_LOADED"] = function(self, addonLoaded)
 end
 
 events["PLAYER_ENTERING_WORLD"] = function(self, isInitialLogin, isReloadingUi)
-    -- Scan bags after a short delay to ensure everything is loaded
-    C_Timer.After(2, function()
+    -- Initialize bag state after a short delay without triggering openings
+    C_Timer.After(1, function()
         if ACO.db and ACO.db.enabled then
-            ACO:Debug("Scan initial des sacs au chargement...")
-            ACO:ScanBagsForContainers()
+            ACO:Debug("Initialisation de l'état des sacs au chargement...")
+            ACO:InitializeBagState()
+            ACO.bagStateInitialized = true
+            ACO:Debug("État des sacs prêt - détection des nouveaux items activée")
         end
     end)
 end
 
 events["BAG_UPDATE_DELAYED"] = function(self)
+    -- Only scan if bag state has been initialized (prevents false positives at login)
+    if not ACO.bagStateInitialized then
+        ACO:Debug("BAG_UPDATE_DELAYED ignoré - état des sacs non initialisé")
+        return
+    end
     -- Check for new items in bags
     ACO:ScanBagsForContainers()
 end
@@ -861,6 +901,35 @@ end
 
 -- Track recently seen items to detect new ones
 ACO.lastBagState = {}
+
+-- Initialize bag state without triggering any openings (for login/reload)
+function ACO:InitializeBagState()
+    if not self.db or not self.db.enabled then return end
+    
+    local currentBagState = {}
+    
+    for bag = 0, 4 do
+        local numSlots = C_Container.GetContainerNumSlots(bag)
+        for slot = 1, numSlots do
+            local info = C_Container.GetContainerItemInfo(bag, slot)
+            if info and info.itemID then
+                local key = bag .. "_" .. slot
+                currentBagState[key] = info.itemID
+            end
+        end
+    end
+    
+    self.lastBagState = currentBagState
+    self:Debug("État des sacs initialisé avec " .. self:CountTableElements(currentBagState) .. " items")
+end
+
+function ACO:CountTableElements(tbl)
+    local count = 0
+    for _ in pairs(tbl) do
+        count = count + 1
+    end
+    return count
+end
 
 function ACO:ScanBagsForContainers()
     if not self.db or not self.db.enabled then return end
@@ -882,22 +951,20 @@ function ACO:ScanBagsForContainers()
                 if self.pendingSlots[key] then
                     -- Already pending, skip
                 elseif self:CanOpenItem(itemID) then
-                    -- Check if this is a new item OR if it's a user-defined container
+                    -- ONLY open if this is a genuinely NEW item (just appeared in this slot)
                     local isNewItem = (lastState[key] ~= itemID)
-                    local isUserContainer = userContainers[itemID]
-                    local isAutoDetected = self:IsContainerItem(itemID)
                     
-                    if isNewItem or isUserContainer then
-                        if isNewItem then
-                            self:Debug("Nouvel item détecté: " .. itemID .. " at " .. key)
-                        else
-                            self:Debug("Container utilisateur trouvé: " .. itemID .. " at " .. key)
+                    if isNewItem then
+                        local isUserContainer = userContainers[itemID]
+                        local isAutoDetected = self:IsContainerItem(itemID)
+                        
+                        if isUserContainer then
+                            self:Debug("Nouveau container utilisateur détecté: " .. itemID .. " at " .. key)
+                            self:QueueItem(itemID, info.hyperlink, bag, slot)
+                        elseif isAutoDetected then
+                            self:Debug("Nouveau container auto-détecté: " .. itemID .. " at " .. key)
+                            self:QueueItem(itemID, info.hyperlink, bag, slot)
                         end
-                        self:QueueItem(itemID, info.hyperlink, bag, slot)
-                    elseif isAutoDetected and not lastState[key] then
-                        -- Auto-detected container on first scan
-                        self:Debug("Container auto-détecté: " .. itemID .. " at " .. key)
-                        self:QueueItem(itemID, info.hyperlink, bag, slot)
                     end
                 end
             end

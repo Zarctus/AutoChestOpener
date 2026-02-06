@@ -934,6 +934,29 @@ function ACO:InitUI()
         GameTooltip:Hide()
     end)
     
+    -- Remove All Button
+    local RemoveAllBtn = CreateModernButton(ListSection, "Retirer tout", 80, 24, false)
+    RemoveAllBtn:SetPoint("RIGHT", ExportBtn, "LEFT", -8, 0)
+    RemoveAllBtn:SetScript("OnClick", function()
+        StaticPopup_Show("ACO_REMOVE_ALL_CONTAINERS")
+    end)
+    RemoveAllBtn:SetScript("OnEnter", function(self)
+        self:SetBackdropColor(c.error.r * 0.4, c.error.g * 0.4, c.error.b * 0.4, 1)
+        self:SetBackdropBorderColor(c.error.r, c.error.g, c.error.b, 1)
+        self.text:SetTextColor(1, 1, 1)
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:AddLine("Retirer tous les conteneurs", 1, 0.3, 0.3)
+        GameTooltip:AddLine("Retire TOUS les conteneurs de la liste.", 0.8, 0.8, 0.8)
+        GameTooltip:AddLine("|cffff8800Cette action est définitive !|r", 1, 0.5, 0)
+        GameTooltip:Show()
+    end)
+    RemoveAllBtn:SetScript("OnLeave", function(self)
+        self:SetBackdropColor(c.backgroundLight.r, c.backgroundLight.g, c.backgroundLight.b, 0.9)
+        self:SetBackdropBorderColor(c.primary.r * 0.5, c.primary.g * 0.5, c.primary.b * 0.5, 0.8)
+        self.text:SetTextColor(c.text.r, c.text.g, c.text.b)
+        GameTooltip:Hide()
+    end)
+    
     -- Scroll frame
     local ScrollFrame = CreateFrame("ScrollFrame", nil, ListSection, "UIPanelScrollFrameTemplate")
     ScrollFrame:SetPoint("TOPLEFT", PADDING, -35)
@@ -1407,6 +1430,19 @@ function ACO:InitUI()
         button2 = "Non",
         OnAccept = function()
             ACO:ClearHistory()
+        end,
+        timeout = 0,
+        whileDead = true,
+        hideOnEscape = true,
+        preferredIndex = 3,
+    }
+    
+    StaticPopupDialogs["ACO_REMOVE_ALL_CONTAINERS"] = {
+        text = "|cffff8800ATTENTION !|r\n\nCette action va retirer TOUS les conteneurs de la liste.\n\nVoulez-vous continuer ?",
+        button1 = "Oui, retirer tout",
+        button2 = "Annuler",
+        OnAccept = function()
+            ACO:RemoveAllContainers()
         end,
         timeout = 0,
         whileDead = true,
