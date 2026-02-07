@@ -6,16 +6,17 @@
 ## Category: Inventory
 ## Version: 1.3.0
 ## SavedVariables: AutoChestOpenerDB
-## IconTexture: Interface\Icons\inv_misc_treasurechest02a
+## IconTexture: Interface\AddOns\AutoChestOpener\textures\treasure.tga
 ## X-Category: Inventory
 ## X-License: MIT
-## X-Website: https://github.com/Zarctus/AutoChestOpener
 ## X-Curse-Project-ID: 
 ## X-WoWI-ID: 
 
 ## OptionalDeps: ElvUI, Zarctus_Gold
 
 Libs\LibStub\LibStub.lua
+
+Locales.lua
 
 Core.lua
 UI.lua

@@ -474,7 +474,7 @@ function ACO:InitUI()
     -- Title
     local Title = Header:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
     Title:SetPoint("LEFT", Icon, "RIGHT", 10, 0)
-    Title:SetText("|cff00ccffAuto Chest Opener|r")
+    Title:SetText(ACO:Translate("TITLE"))
     
     -- Version
     local Version = Header:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
@@ -586,9 +586,9 @@ function ACO:InitUI()
         return tab
     end
     
-    local containersTab = CreateTab(TabContainer, "Conteneurs", "VignetteLootChest", "containers", PADDING)
-    local statsTab = CreateTab(TabContainer, "Statistiques", "poi-workorders", "stats", PADDING + 134)
-    local historyTab = CreateTab(TabContainer, "Historique", "communities-icon-clock", "history", PADDING + 268)
+    local containersTab = CreateTab(TabContainer, ACO:Translate("TAB_CONTAINERS"), "VignetteLootChest", "containers", PADDING)
+    local statsTab = CreateTab(TabContainer, ACO:Translate("TAB_STATS"), "poi-workorders", "stats", PADDING + 134)
+    local historyTab = CreateTab(TabContainer, ACO:Translate("TAB_HISTORY"), "communities-icon-clock", "history", PADDING + 268)
     
     function UI:SwitchTab(tabKey)
         self.currentTab = tabKey
@@ -645,11 +645,11 @@ function ACO:InitUI()
     
     local OptionsTitle = OptionsSection:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     OptionsTitle:SetPoint("LEFT", OptionsIcon, "RIGHT", 6, 0)
-    OptionsTitle:SetText("Paramètres")
+    OptionsTitle:SetText(ACO:Translate("OPTIONS_TITLE"))
     OptionsTitle:SetTextColor(c.primary.r, c.primary.g, c.primary.b)
     
     -- Enable checkbox
-    local EnableCheck = CreateModernCheckbox(OptionsSection, "Activer l'ouverture automatique", "Active ou désactive l'addon")
+    local EnableCheck = CreateModernCheckbox(OptionsSection, ACO:Translate("ENABLE_AUTO_OPEN"), ACO:Translate("ENABLE_TOOLTIP"))
     EnableCheck:SetPoint("TOPLEFT", OptionsTitle, "BOTTOMLEFT", 0, -12)
     EnableCheck.checkbox:SetChecked(ACO.db.enabled)
     EnableCheck.checkbox.callback = function(checked)
@@ -657,7 +657,7 @@ function ACO:InitUI()
     end
     
     -- Notifications checkbox
-    local NotifyCheck = CreateModernCheckbox(OptionsSection, "Afficher les notifications", "Affiche les messages dans le chat")
+    local NotifyCheck = CreateModernCheckbox(OptionsSection, ACO:Translate("SHOW_NOTIFICATIONS"), ACO:Translate("SHOW_NOTIFICATIONS_TOOLTIP"))
     NotifyCheck:SetPoint("TOPLEFT", EnableCheck, "BOTTOMLEFT", 0, -8)
     NotifyCheck.checkbox:SetChecked(ACO.db.showNotifications)
     NotifyCheck.checkbox.callback = function(checked)
@@ -665,7 +665,7 @@ function ACO:InitUI()
     end
     
     -- Sound checkbox
-    local SoundCheck = CreateModernCheckbox(OptionsSection, "Jouer les sons", "Joue un son lors de l'ouverture")
+    local SoundCheck = CreateModernCheckbox(OptionsSection, ACO:Translate("PLAY_SOUNDS"), ACO:Translate("PLAY_SOUNDS_TOOLTIP"))
     SoundCheck:SetPoint("LEFT", NotifyCheck, "RIGHT", 80, 0)
     SoundCheck.checkbox:SetChecked(ACO.db.notificationSound)
     SoundCheck.checkbox.callback = function(checked)
@@ -673,7 +673,7 @@ function ACO:InitUI()
     end
     
     -- Delay slider
-    local DelaySlider = CreateModernSlider(OptionsSection, "Délai avant ouverture:", 0, 10, 0.5, "Temps d'attente avant l'ouverture automatique")
+    local DelaySlider = CreateModernSlider(OptionsSection, ACO:Translate("DELAY_SLIDER_LABEL"), 0, 10, 0.5, ACO:Translate("DELAY_TOOLTIP"))
     DelaySlider:SetPoint("TOPLEFT", NotifyCheck, "BOTTOMLEFT", 0, -12)
     DelaySlider.callback = function(value)
         ACO.db.delay = value
@@ -723,7 +723,7 @@ function ACO:InitUI()
     
     local AddTitle = AddSection:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     AddTitle:SetPoint("LEFT", AddIcon, "RIGHT", 6, 0)
-    AddTitle:SetText("Ajouter un conteneur")
+    AddTitle:SetText(ACO:Translate("ADD_TITLE"))
     AddTitle:SetTextColor(c.success.r, c.success.g, c.success.b)
     
     -- Drop zone / Input
@@ -736,7 +736,7 @@ function ACO:InitUI()
     
     local DropText = DropZone:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     DropText:SetPoint("CENTER")
-    DropText:SetText("|cff888888Glissez un item ici|r")
+    DropText:SetText(ACO:Translate("DROPZONE_EMPTY"))
     DropZone.text = DropText
     
     -- Handle item drop
@@ -746,9 +746,9 @@ function ACO:InitUI()
             ClearCursor()
             if itemID then
                 ACO:AddContainer(itemID)
-                DropText:SetText("|cff00ff80Item ajouté!|r")
+                DropText:SetText(ACO:Translate("DROPZONE_ADDED"))
                 C_Timer.After(1.5, function()
-                    DropText:SetText("|cff888888Glissez un item ici|r")
+                    DropText:SetText(ACO:Translate("DROPZONE_EMPTY"))
                 end)
             end
         end
@@ -760,9 +760,9 @@ function ACO:InitUI()
             ClearCursor()
             if itemID then
                 ACO:AddContainer(itemID)
-                DropText:SetText("|cff00ff80Item ajouté!|r")
+                DropText:SetText(ACO:Translate("DROPZONE_ADDED"))
                 C_Timer.After(1.5, function()
-                    DropText:SetText("|cff888888Glissez un item ici|r")
+                    DropText:SetText(ACO:Translate("DROPZONE_EMPTY"))
                 end)
             end
         end
@@ -771,7 +771,7 @@ function ACO:InitUI()
     DropZone:SetScript("OnEnter", function(self)
         self:SetBackdropBorderColor(c.primary.r, c.primary.g, c.primary.b, 1)
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:SetText("Glissez un coffre, sac ou conteneur ici pour l'ajouter à la liste", nil, nil, nil, nil, true)
+        GameTooltip:SetText(ACO:Translate("DROPZONE_TOOLTIP"), nil, nil, nil, nil, true)
         GameTooltip:Show()
     end)
     
@@ -795,7 +795,7 @@ function ACO:InitUI()
     
     local IDPlaceholder = IDInput:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     IDPlaceholder:SetPoint("CENTER")
-    IDPlaceholder:SetText("|cff666666Item ID|r")
+    IDPlaceholder:SetText(ACO:Translate("ID_PLACEHOLDER"))
     
     IDInput:SetScript("OnTextChanged", function(self)
         if self:GetText() ~= "" then
@@ -820,7 +820,7 @@ function ACO:InitUI()
     end)
     
     -- Add button
-    local AddBtn = CreateModernButton(AddSection, "Ajouter", 80, 40, true)
+    local AddBtn = CreateModernButton(AddSection, ACO:Translate("ADD_BTN"), 80, 40, true)
     AddBtn:SetPoint("LEFT", IDInput, "RIGHT", 10, 0)
     AddBtn:SetScript("OnClick", function()
         local id = tonumber(IDInput:GetText())
@@ -828,7 +828,7 @@ function ACO:InitUI()
             ACO:AddContainer(id)
             IDInput:SetText("")
         else
-            ACO:Print("Veuillez entrer un ID valide.", true)
+            ACO:Print(ACO:Translate("INVALID_ID"), true)
         end
     end)
     
@@ -853,7 +853,7 @@ function ACO:InitUI()
     
     local ListTitle = ListSection:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     ListTitle:SetPoint("LEFT", ListIcon, "RIGHT", 6, 0)
-    ListTitle:SetText("Conteneurs enregistrés")
+    ListTitle:SetText(ACO:Translate("LIST_TITLE"))
     ListTitle:SetTextColor(c.accent.r, c.accent.g, c.accent.b)
     
     -- Count
@@ -863,12 +863,12 @@ function ACO:InitUI()
     UI.listCount = ListCount
     
     -- Open All Button
-    local OpenAllBtn = CreateModernButton(ListSection, "Ouvrir tout", 90, 24, true)
+    local OpenAllBtn = CreateModernButton(ListSection, ACO:Translate("OPEN_ALL"), 90, 24, true)
     OpenAllBtn:SetPoint("TOPRIGHT", -PADDING, -PADDING + 4)
     OpenAllBtn:SetScript("OnClick", function()
         local count = ACO:OpenAllContainers()
         if count > 0 then
-            ACO:Print(string.format("Ouverture de %d conteneur(s)...", count))
+            ACO:Print(ACO:Translate("OPEN_ALL_RESULT", count))
         end
     end)
     OpenAllBtn:SetScript("OnEnter", function(self)
@@ -876,9 +876,11 @@ function ACO:InitUI()
         self:SetBackdropBorderColor(c.primary.r, c.primary.g, c.primary.b, 1)
         self.text:SetTextColor(1, 1, 1)
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:AddLine("Ouvrir tous les conteneurs")
-        GameTooltip:AddLine("Ouvre immédiatement tous les conteneurs", 0.8, 0.8, 0.8)
-        GameTooltip:AddLine("référencés présents dans votre inventaire.", 0.8, 0.8, 0.8)
+        GameTooltip:AddLine(ACO:Translate("OPEN_ALL_T1"))
+        GameTooltip:AddLine(ACO:Translate("OPEN_ALL_T2"), 0.8, 0.8, 0.8)
+        if ACO:Translate("OPEN_ALL_T3") ~= "" then
+            GameTooltip:AddLine(ACO:Translate("OPEN_ALL_T3"), 0.8, 0.8, 0.8)
+        end
         GameTooltip:Show()
     end)
     OpenAllBtn:SetScript("OnLeave", function(self)
@@ -891,7 +893,7 @@ function ACO:InitUI()
     end)
 
     -- Import Button
-    local ImportBtn = CreateModernButton(ListSection, "Import", 60, 24, false)
+    local ImportBtn = CreateModernButton(ListSection, ACO:Translate("IMPORT_BTN"), 60, 24, false)
     ImportBtn:SetPoint("RIGHT", OpenAllBtn, "LEFT", -8, 0)
     ImportBtn:SetScript("OnClick", function()
         ACO:ShowImportFrame()
@@ -901,8 +903,8 @@ function ACO:InitUI()
         self:SetBackdropBorderColor(c.success.r, c.success.g, c.success.b, 1)
         self.text:SetTextColor(1, 1, 1)
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:AddLine("Importer des conteneurs")
-        GameTooltip:AddLine("Collez une liste d'IDs depuis Wowhead", 0.8, 0.8, 0.8)
+        GameTooltip:AddLine(ACO:Translate("IMPORT_T1"))
+        GameTooltip:AddLine(ACO:Translate("IMPORT_T2"), 0.8, 0.8, 0.8)
         GameTooltip:Show()
     end)
     ImportBtn:SetScript("OnLeave", function(self)
@@ -913,7 +915,7 @@ function ACO:InitUI()
     end)
 
     -- Export Button
-    local ExportBtn = CreateModernButton(ListSection, "Export", 60, 24, false)
+    local ExportBtn = CreateModernButton(ListSection, ACO:Translate("EXPORT_BTN"), 60, 24, false)
     ExportBtn:SetPoint("RIGHT", ImportBtn, "LEFT", -8, 0)
     ExportBtn:SetScript("OnClick", function()
         ACO:ShowExportFrame()
@@ -923,8 +925,8 @@ function ACO:InitUI()
         self:SetBackdropBorderColor(c.primary.r, c.primary.g, c.primary.b, 1)
         self.text:SetTextColor(1, 1, 1)
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:AddLine("Exporter les conteneurs")
-        GameTooltip:AddLine("Copiez la liste pour la sauvegarder", 0.8, 0.8, 0.8)
+        GameTooltip:AddLine(ACO:Translate("EXPORT_T1"))
+        GameTooltip:AddLine(ACO:Translate("EXPORT_T2"), 0.8, 0.8, 0.8)
         GameTooltip:Show()
     end)
     ExportBtn:SetScript("OnLeave", function(self)
@@ -935,7 +937,7 @@ function ACO:InitUI()
     end)
     
     -- Remove All Button
-    local RemoveAllBtn = CreateModernButton(ListSection, "Retirer tout", 80, 24, false)
+    local RemoveAllBtn = CreateModernButton(ListSection, ACO:Translate("REMOVE_ALL_BTN"), 80, 24, false)
     RemoveAllBtn:SetPoint("RIGHT", ExportBtn, "LEFT", -8, 0)
     RemoveAllBtn:SetScript("OnClick", function()
         StaticPopup_Show("ACO_REMOVE_ALL_CONTAINERS")
@@ -945,9 +947,9 @@ function ACO:InitUI()
         self:SetBackdropBorderColor(c.error.r, c.error.g, c.error.b, 1)
         self.text:SetTextColor(1, 1, 1)
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:AddLine("Retirer tous les conteneurs", 1, 0.3, 0.3)
-        GameTooltip:AddLine("Retire TOUS les conteneurs de la liste.", 0.8, 0.8, 0.8)
-        GameTooltip:AddLine("|cffff8800Cette action est définitive !|r", 1, 0.5, 0)
+        GameTooltip:AddLine(ACO:Translate("REMOVE_ALL_T1"), 1, 0.3, 0.3)
+        GameTooltip:AddLine(ACO:Translate("REMOVE_ALL_T2"), 0.8, 0.8, 0.8)
+        GameTooltip:AddLine(ACO:Translate("REMOVE_ALL_T3"), 1, 0.5, 0)
         GameTooltip:Show()
     end)
     RemoveAllBtn:SetScript("OnLeave", function(self)
@@ -996,7 +998,7 @@ function ACO:InitUI()
         -- Item ID
         local idText = item:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
         idText:SetPoint("LEFT", icon, "RIGHT", 10, -8)
-        idText:SetText("ID: " .. itemID)
+        idText:SetText(string.format(ACO:Translate("ID_LABEL"), itemID))
         idText:SetTextColor(c.textDim.r, c.textDim.g, c.textDim.b)
         
         -- Remove button
@@ -1016,7 +1018,7 @@ function ACO:InitUI()
             self:SetBackdropColor(c.error.r * 0.5, c.error.g * 0.5, c.error.b * 0.5, 1)
             self:SetBackdropBorderColor(c.error.r, c.error.g, c.error.b, 1)
             GameTooltip:SetOwner(self, "ANCHOR_TOP")
-            GameTooltip:SetText("Retirer de la liste")
+            GameTooltip:SetText(ACO:Translate("REMOVE_TOOLTIP"))
             GameTooltip:Show()
         end)
         
@@ -1039,7 +1041,7 @@ function ACO:InitUI()
                 icon:SetTexture(itemIcon)
             end
         else
-            name:SetText("|cff888888Chargement...|r")
+            name:SetText(ACO:Translate("LOADING"))
             icon:SetTexture("Interface\\Icons\\INV_Misc_QuestionMark")
             
             -- Request item info and update when available
@@ -1101,7 +1103,8 @@ function ACO:InitUI()
         
         -- Update count
         local count = index - 1
-        self.listCount:SetText(count .. " item" .. (count > 1 and "s" or ""))
+        local suffix = (count > 1) and "s" or ""
+        self.listCount:SetText(ACO:Translate("LIST_COUNT", count, suffix))
     end
     
     -- ========================================================================
@@ -1123,11 +1126,11 @@ function ACO:InitUI()
     
     local StatsTitle = StatsPanel:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
     StatsTitle:SetPoint("LEFT", StatsIcon, "RIGHT", 8, 0)
-    StatsTitle:SetText("Statistiques")
+    StatsTitle:SetText(ACO:Translate("STATS_TITLE"))
     StatsTitle:SetTextColor(c.primary.r, c.primary.g, c.primary.b)
     
     -- Clear Stats Button
-    local ClearStatsBtn = CreateModernButton(StatsPanel, "Réinitialiser", 100, 24, false)
+    local ClearStatsBtn = CreateModernButton(StatsPanel, ACO:Translate("CLEAR_STATS_BTN"), 100, 24, false)
     ClearStatsBtn:SetPoint("TOPRIGHT", -PADDING, -PADDING)
     ClearStatsBtn:SetScript("OnClick", function()
         StaticPopup_Show("ACO_CLEAR_STATS")
@@ -1154,18 +1157,18 @@ function ACO:InitUI()
     end
     
     local statLines = {}
-    statLines.total = CreateStatLine(StatsPanel, "Total ouvert (tous temps):", -50)
-    statLines.session = CreateStatLine(StatsPanel, "Ouvert cette session:", -78)
-    statLines.unique = CreateStatLine(StatsPanel, "Items uniques ouverts:", -106)
-    statLines.totalGold = CreateStatLine(StatsPanel, "Or total gagné:", -134)
-    statLines.sessionGold = CreateStatLine(StatsPanel, "Or cette session:", -162)
-    statLines.firstOpen = CreateStatLine(StatsPanel, "Première ouverture:", -190)
-    statLines.lastOpen = CreateStatLine(StatsPanel, "Dernière ouverture:", -218)
+    statLines.total = CreateStatLine(StatsPanel, ACO:Translate("STATS_TOTAL"), -50)
+    statLines.session = CreateStatLine(StatsPanel, ACO:Translate("STATS_SESSION"), -78)
+    statLines.unique = CreateStatLine(StatsPanel, ACO:Translate("STATS_UNIQUE"), -106)
+    statLines.totalGold = CreateStatLine(StatsPanel, ACO:Translate("STATS_TOTALGOLD"), -134)
+    statLines.sessionGold = CreateStatLine(StatsPanel, ACO:Translate("STATS_SESSIONGOLD"), -162)
+    statLines.firstOpen = CreateStatLine(StatsPanel, ACO:Translate("STATS_FIRST"), -190)
+    statLines.lastOpen = CreateStatLine(StatsPanel, ACO:Translate("STATS_LAST"), -218)
     
     -- Top items section
     local TopItemsTitle = StatsPanel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     TopItemsTitle:SetPoint("TOPLEFT", PADDING, -256)
-    TopItemsTitle:SetText("Top 5 des items les plus ouverts:")
+    TopItemsTitle:SetText(ACO:Translate("TOP_ITEMS_TITLE"))
     TopItemsTitle:SetTextColor(c.secondary.r, c.secondary.g, c.secondary.b)
     
     UI.topItemsFrames = {}
@@ -1272,11 +1275,11 @@ function ACO:InitUI()
     
     local HistoryTitle = HistoryPanel:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
     HistoryTitle:SetPoint("LEFT", HistoryIcon, "RIGHT", 8, 0)
-    HistoryTitle:SetText("Historique des ouvertures")
+    HistoryTitle:SetText(ACO:Translate("HISTORY_TITLE"))
     HistoryTitle:SetTextColor(c.primary.r, c.primary.g, c.primary.b)
     
     -- Clear History Button
-    local ClearHistoryBtn = CreateModernButton(HistoryPanel, "Effacer", 80, 24, false)
+    local ClearHistoryBtn = CreateModernButton(HistoryPanel, ACO:Translate("CLEAR_HISTORY_BTN"), 80, 24, false)
     ClearHistoryBtn:SetPoint("TOPRIGHT", -PADDING, -PADDING)
     ClearHistoryBtn:SetScript("OnClick", function()
         StaticPopup_Show("ACO_CLEAR_HISTORY")
@@ -1358,7 +1361,7 @@ function ACO:InitUI()
             GameTooltip:SetHyperlink("item:" .. entry.itemID)
             if entry.goldGained and entry.goldGained > 0 then
                 GameTooltip:AddLine(" ")
-                GameTooltip:AddLine("Or obtenu: " .. ACO:FormatMoneyShort(entry.goldGained), 1, 0.84, 0)
+                GameTooltip:AddLine(string.format(ACO:Translate("HISTORY_GOLD_LINE"), ACO:FormatMoneyShort(entry.goldGained)), 1, 0.84, 0)
             end
             GameTooltip:Show()
         end)
@@ -1387,7 +1390,7 @@ function ACO:InitUI()
             if not self.historyEmptyText then
                 self.historyEmptyText = HistoryScrollChild:CreateFontString(nil, "OVERLAY", "GameFontNormal")
                 self.historyEmptyText:SetPoint("CENTER", 0, 50)
-                self.historyEmptyText:SetText("|cff666666Aucune ouverture enregistrée|r")
+                self.historyEmptyText:SetText(ACO:Translate("HISTORY_EMPTY"))
             end
             self.historyEmptyText:Show()
             HistoryScrollChild:SetHeight(100)
@@ -1412,9 +1415,9 @@ function ACO:InitUI()
     -- ========================================================================
     
     StaticPopupDialogs["ACO_CLEAR_STATS"] = {
-        text = "Voulez-vous réinitialiser toutes les statistiques ?",
-        button1 = "Oui",
-        button2 = "Non",
+        text = ACO:Translate("POPUP_CLEAR_STATS_TEXT"),
+        button1 = ACO:Translate("POPUP_YES"),
+        button2 = ACO:Translate("POPUP_NO"),
         OnAccept = function()
             ACO:ClearStats()
         end,
@@ -1425,9 +1428,9 @@ function ACO:InitUI()
     }
     
     StaticPopupDialogs["ACO_CLEAR_HISTORY"] = {
-        text = "Voulez-vous effacer tout l'historique ?",
-        button1 = "Oui",
-        button2 = "Non",
+        text = ACO:Translate("POPUP_CLEAR_HISTORY_TEXT"),
+        button1 = ACO:Translate("POPUP_YES"),
+        button2 = ACO:Translate("POPUP_NO"),
         OnAccept = function()
             ACO:ClearHistory()
         end,
@@ -1438,9 +1441,9 @@ function ACO:InitUI()
     }
     
     StaticPopupDialogs["ACO_REMOVE_ALL_CONTAINERS"] = {
-        text = "|cffff8800ATTENTION !|r\n\nCette action va retirer TOUS les conteneurs de la liste.\n\nVoulez-vous continuer ?",
-        button1 = "Oui, retirer tout",
-        button2 = "Annuler",
+        text = ACO:Translate("POPUP_REMOVE_ALL_TEXT"),
+        button1 = ACO:Translate("POPUP_YES"),
+        button2 = ACO:Translate("POPUP_NO"),
         OnAccept = function()
             ACO:RemoveAllContainers()
         end,
@@ -1530,12 +1533,12 @@ function ACO:InitUI()
     background:SetTexture(136467) -- Interface\Minimap\UI-Minimap-Background
     background:SetVertexColor(0, 0, 0, 0.6)
     
-    -- Icône principale (coffre)
+    -- Icône principale (utilise l'icône personnalisée dans textures/treasure.tga)
     local icon = MinimapButton:CreateTexture(nil, "ARTWORK")
     icon:SetSize(18, 18)
     icon:SetPoint("CENTER", 0, 0)
-    icon:SetTexture(132594) -- Interface\Icons\INV_Box_02 (coffre)
-    icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+    icon:SetTexture("Interface\\AddOns\\AutoChestOpener\\textures\\treasure.tga")
+    icon:SetTexCoord(0, 1, 0, 1)
     
     -- Bordure style minimap (avec offset correct TOPLEFT)
     local border = MinimapButton:CreateTexture(nil, "OVERLAY")
@@ -1580,20 +1583,20 @@ function ACO:InitUI()
             UI:Toggle()
         elseif button == "RightButton" then
             ACO.db.enabled = not ACO.db.enabled
-            ACO:Print(ACO.db.enabled and "Activé" or "Désactivé")
+            ACO:Print(ACO.db.enabled and ACO:Translate("ENABLED") or ACO:Translate("DISABLED"))
             EnableCheck.checkbox:SetChecked(ACO.db.enabled)
         end
     end)
     
     MinimapButton:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_LEFT")
-        GameTooltip:AddLine("|cff00ccffAuto Chest Opener|r")
+        GameTooltip:AddLine(ACO:Translate("TITLE"))
         GameTooltip:AddLine(" ")
-        GameTooltip:AddLine("|cffffffffClic gauche:|r Ouvrir les options", 0.8, 0.8, 0.8)
-        GameTooltip:AddLine("|cffffffffClic droit:|r Activer/Désactiver", 0.8, 0.8, 0.8)
+        GameTooltip:AddLine("|cffffffff" .. ACO:Translate("MINIMAP_LEFT") .. "|r", 0.8, 0.8, 0.8)
+        GameTooltip:AddLine("|cffffffff" .. ACO:Translate("MINIMAP_RIGHT") .. "|r", 0.8, 0.8, 0.8)
         GameTooltip:AddLine(" ")
-        local status = ACO.db.enabled and "|cff00ff00Activé|r" or "|cffff0000Désactivé|r"
-        GameTooltip:AddLine("Statut: " .. status)
+        local status = ACO.db.enabled and ("|cff00ff00" .. ACO:Translate("ENABLED") .. "|r") or ("|cffff0000" .. ACO:Translate("DISABLED") .. "|r")
+        GameTooltip:AddLine(string.format(ACO:Translate("MINIMAP_STATUS"), status))
         GameTooltip:Show()
     end)
     
@@ -1601,6 +1604,13 @@ function ACO:InitUI()
         GameTooltip:Hide()
     end)
     
+    -- Respect user setting pour masquer le bouton minimap
+    if ACO.db and ACO.db.minimap and ACO.db.minimap.hide then
+        MinimapButton:Hide()
+    else
+        MinimapButton:Show()
+    end
+
     UI.minimapButton = MinimapButton
 end
 

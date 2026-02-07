@@ -140,6 +140,14 @@ function ACO:IsContainerItem(itemID)
     if self.db and self.db.containers[itemID] then
         return true
     end
+
+    -- Exclude equippable items (bags, armors, weapons) to avoid treating
+    -- craftable/equipable bags as openable containers.
+    local equipLoc = select(9, GetItemInfo(itemID))
+    if equipLoc and equipLoc ~= "" then
+        self.containerCache[itemID] = false
+        return false
+    end
     
     -- Check cache
     if self.containerCache[itemID] ~= nil then
@@ -299,7 +307,7 @@ function ACO:OpenItem(itemID)
     
     if self.db.showNotifications then
         local itemLink = self:FormatItemLink(itemID)
-        self:Print(format("Ouverture de %s...", itemLink))
+        self:Print(ACO:Translate("OPENING", itemLink))
     end
     
     if self.db.notificationSound then
@@ -334,7 +342,7 @@ function ACO:QueueItem(itemID, itemLink, bag, slot)
     
     if self.db.showNotifications then
         local link = itemLink or self:FormatItemLink(itemID)
-        self:Print(format("Ouverture de %s dans %d secondes...", link, delay))
+        self:Print(ACO:Translate("OPENING_IN_SECONDS", link, delay))
     end
     
     -- Schedule opening
@@ -349,14 +357,14 @@ function ACO:QueueItem(itemID, itemLink, bag, slot)
         
         if selfRef:CanOpenItem(itemID) then
             -- Try to open from specific slot first, fallback to any slot with this item
-            if targetBag and targetSlot then
+                    if targetBag and targetSlot then
                 local info = C_Container.GetContainerItemInfo(targetBag, targetSlot)
                 if info and info.itemID == itemID then
                     selfRef:NotifyZarctusGold(itemID, info.itemName)
                     C_Container.UseContainerItem(targetBag, targetSlot)
                     selfRef:RecordOpening(itemID)
                     if selfRef.db.showNotifications then
-                        selfRef:Print(format("Ouverture de %s...", itemLink or selfRef:FormatItemLink(itemID)))
+                        selfRef:Print(ACO:Translate("OPENING", itemLink or selfRef:FormatItemLink(itemID)))
                     end
                     if selfRef.db.notificationSound then
                         PlaySound(selfRef.SOUNDS.OPEN)
@@ -376,7 +384,7 @@ end
 
 function ACO:OpenAllContainers()
     if InCombatLockdown() then
-        self:Print("Impossible d'ouvrir en combat!", true)
+        self:Print(ACO:Translate("CANNOT_OPEN_IN_COMBAT"), true)
         return 0
     end
     
@@ -396,7 +404,7 @@ function ACO:OpenAllContainers()
     end
     
     if #toOpen == 0 then
-        self:Print("Aucun conteneur référencé trouvé dans l'inventaire.")
+        self:Print(ACO:Translate("NO_CONTAINERS_FOUND"))
         return 0
     end
     
@@ -420,8 +428,7 @@ function ACO:OpenAllContainers()
                 
                 opened = opened + 1
                 if showNotif then
-                    selfRef:Print(format("Ouverture de %s (%d/%d)", 
-                        data.link or selfRef:FormatItemLink(data.itemID), i, totalCount))
+                    selfRef:Print(ACO:Translate("OPENING_COUNT", data.link or selfRef:FormatItemLink(data.itemID), i, totalCount))
                 end
             end
         end)
@@ -442,7 +449,7 @@ function ACO:AddContainer(itemID)
     if not itemID or itemID == 0 then return false end
     
     if self.db.containers[itemID] then
-        self:Print("Cet item est déjà dans la liste.", true)
+        self:Print(ACO:Translate("ITEM_ALREADY_LISTED"), true)
         return false
     end
     
@@ -452,7 +459,7 @@ function ACO:AddContainer(itemID)
     self.containerCache[itemID] = nil
     
     local itemLink = self:FormatItemLink(itemID)
-    self:Print(string.format("Ajouté: %s", itemLink))
+    self:Print(ACO:Translate("ADDED", itemLink))
     
     if self.db.notificationSound then
         PlaySound(self.SOUNDS.ADD)
@@ -500,14 +507,14 @@ function ACO:RemoveContainer(itemID)
     if not itemID then return false end
     
     if not self.db.containers[itemID] then
-        self:Print("Cet item n'est pas dans la liste.", true)
+        self:Print(ACO:Translate("ITEM_NOT_LISTED"), true)
         return false
     end
     
     self.db.containers[itemID] = nil
     
     local itemLink = self:FormatItemLink(itemID)
-    self:Print(string.format("Retiré: %s", itemLink))
+    self:Print(ACO:Translate("REMOVED", itemLink))
     
     if self.db.notificationSound then
         PlaySound(self.SOUNDS.REMOVE)
@@ -530,14 +537,14 @@ function ACO:RemoveAllContainers()
     end
     
     if count == 0 then
-        self:Print("Aucun conteneur à retirer.")
+        self:Print(ACO:Translate("NO_CONTAINERS_TO_REMOVE"))
         return 0
     end
     
     -- Clear all containers
     wipe(self.db.containers)
     
-    self:Print(format("|cffff8800%d conteneur(s) retiré(s).|r", count))
+    self:Print(ACO:Translate("REMOVED_COUNT", count))
     
     if self.db.notificationSound then
         PlaySound(self.SOUNDS.REMOVE)
@@ -556,7 +563,7 @@ function ACO:AddToBlacklist(itemID)
     
     self.db.blacklist[itemID] = true
     local itemLink = self:FormatItemLink(itemID)
-    self:Print(string.format("Blacklisté: %s", itemLink))
+    self:Print(ACO:Translate("BLACKLISTED", itemLink))
     
     return true
 end
@@ -566,7 +573,7 @@ function ACO:RemoveFromBlacklist(itemID)
     
     self.db.blacklist[itemID] = nil
     local itemLink = self:FormatItemLink(itemID)
-    self:Print(string.format("Retiré de la blacklist: %s", itemLink))
+    self:Print(ACO:Translate("REMOVED_FROM_BLACKLIST", itemLink))
     
     return true
 end
@@ -813,7 +820,7 @@ function ACO:ClearStats()
         totalGold = 0,
         sessionGold = 0,
     }
-    self:Print("Statistiques réinitialisées.")
+    self:Print(ACO:Translate("STATS_CLEARED"))
     if self.UI and self.UI.RefreshStats then
         self.UI:RefreshStats()
     end
@@ -822,7 +829,7 @@ end
 -- Clear history
 function ACO:ClearHistory()
     wipe(self.db.history)
-    self:Print("Historique effacé.")
+    self:Print(ACO:Translate("HISTORY_CLEARED"))
     if self.UI and self.UI.RefreshHistory then
         self.UI:RefreshHistory()
     end
@@ -857,7 +864,7 @@ events["ADDON_LOADED"] = function(self, addonLoaded)
     -- Initialize bag state immediately to prevent false "new item" detections
     ACO.bagStateInitialized = false
     
-    ACO:Print("Addon chargé! Tapez |cff00ccff/aco|r pour ouvrir les options.")
+    ACO:Print(ACO:Translate("ADDON_LOADED"))
     
     -- Initialize UI after a short delay
     C_Timer.After(0.5, function()
@@ -1000,17 +1007,17 @@ SlashCmdList["AUTOCHESTOPENER"] = function(msg)
         if itemID then
             ACO:AddContainer(itemID)
         else
-            ACO:Print("Usage: /aco add <itemID>", true)
+            ACO:Print(ACO:Translate("USAGE_INFO"), true)
         end
     elseif cmd == "remove" and arg then
         local itemID = tonumber(arg)
         if itemID then
             ACO:RemoveContainer(itemID)
         else
-            ACO:Print("Usage: /aco remove <itemID>", true)
+            ACO:Print(ACO:Translate("USAGE_REMOVE"), true)
         end
     elseif cmd == "list" then
-        ACO:Print("Conteneurs enregistrés:")
+        ACO:Print(ACO:Translate("LIST_TITLE") .. ":")
         local count = 0
         for itemID in pairs(ACO.db.containers) do
             local itemLink = ACO:FormatItemLink(itemID)
@@ -1022,18 +1029,18 @@ SlashCmdList["AUTOCHESTOPENER"] = function(msg)
         end
     elseif cmd == "toggle" then
         ACO.db.enabled = not ACO.db.enabled
-        ACO:Print(ACO.db.enabled and "Activé" or "Désactivé")
+        ACO:Print(ACO.db.enabled and ACO:Translate("ENABLED") or ACO:Translate("DISABLED"))
     elseif cmd == "delay" and arg then
         local delay = tonumber(arg)
         if delay and delay >= 0 and delay <= 30 then
             ACO.db.delay = delay
-            ACO:Print("Délai réglé à " .. delay .. " secondes")
+            ACO:Print(string.format(ACO:Translate("DELAY_SET"), delay))
         else
-            ACO:Print("Le délai doit être entre 0 et 30 secondes", true)
+            ACO:Print(ACO:Translate("DELAY_INVALID"), true)
         end
     elseif cmd == "debug" then
         ACO.db.debugMode = not ACO.db.debugMode
-        ACO:Print("Mode debug: " .. (ACO.db.debugMode and "activé" or "désactivé"))
+        ACO:Print(string.format(ACO:Translate("DEBUG_MODE"), (ACO.db.debugMode and "on" or "off")))
     elseif cmd == "openall" or cmd == "open" then
         local count = ACO:OpenAllContainers()
         if count > 0 then
@@ -1087,7 +1094,7 @@ SlashCmdList["AUTOCHESTOPENER"] = function(msg)
             print(format("  Détecté comme container: %s", isContainer and "Oui" or "Non"))
             print(format("  Peut être ouvert: %s", canOpen and "Oui" or "Non"))
         else
-            ACO:Print("Usage: /aco info <itemID>", true)
+            ACO:Print(ACO:Translate("USAGE_ADD"), true)
         end
     elseif cmd == "scan" then
         -- Force a bag scan
@@ -1096,13 +1103,13 @@ SlashCmdList["AUTOCHESTOPENER"] = function(msg)
         ACO.pendingSlots = {} -- Clear pending slots
         wipe(ACO.pendingItems) -- Clear pending items
         ACO:ScanBagsForContainers()
-        ACO:Print("Scan des sacs effectué!")
+        ACO:Print(ACO:Translate("SCAN_DONE"))
     elseif cmd == "" or cmd == "config" or cmd == "options" then
         if ACO.UI and ACO.UI.Toggle then
             ACO.UI:Toggle()
         end
     else
-        ACO:Print("Commandes disponibles:")
+        ACO:Print(ACO:Translate("COMMANDS_AVAILABLE"))
         print("  /aco - Ouvrir l'interface")
         print("  /aco add <itemID> - Ajouter un conteneur")
         print("  /aco remove <itemID> - Retirer un conteneur")
@@ -1138,7 +1145,7 @@ end
 
 function ACO:ImportContainers(importString, clearExisting)
     if not importString or importString == "" then
-        self:Print("Chaîne d'import vide.", true)
+        self:Print(ACO:Translate("IMPORT_EMPTY"), true)
         return 0
     end
     
@@ -1155,7 +1162,7 @@ function ACO:ImportContainers(importString, clearExisting)
         end
     end
     
-    self:Print(string.format("Importé %d conteneur(s)!", count))
+    self:Print(string.format(ACO:Translate("IMPORTED_COUNT"), count))
     
     if ACO.UI and ACO.UI.RefreshList then
         ACO.UI:RefreshList()
@@ -1180,7 +1187,7 @@ SlashCmdList["AUTOCHESTOPENER"] = function(msg)
         end
     elseif cmd == "clear" then
         wipe(ACO.db.containers)
-        ACO:Print("Liste des conteneurs vidée.")
+        ACO:Print(ACO:Translate("LIST_CLEARED"))
         if ACO.UI and ACO.UI.RefreshList then
             ACO.UI:RefreshList()
         end
@@ -1320,7 +1327,7 @@ function ACO:CreateImportExportFrame()
     
     local importText = importBtn:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     importText:SetPoint("CENTER")
-    importText:SetText("Importer")
+    importText:SetText(ACO:Translate("IMPORT_BTN"))
     importText:SetTextColor(1, 1, 1)
     
     importBtn:SetScript("OnEnter", function(self)
@@ -1352,13 +1359,13 @@ function ACO:CreateImportExportFrame()
     
     local clearImportText = clearImportBtn:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     clearImportText:SetPoint("CENTER")
-    clearImportText:SetText("Remplacer tout")
+    clearImportText:SetText(ACO:Translate("LIST_CLEARED"))
     clearImportText:SetTextColor(1, 1, 1)
     
     clearImportBtn:SetScript("OnEnter", function(self)
         self:SetBackdropColor(0.7, 0.4, 0, 1)
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:SetText("Efface la liste actuelle et importe")
+        GameTooltip:SetText(ACO:Translate("CLEAR_IMPORT_TOOLTIP"))
         GameTooltip:Show()
     end)
     clearImportBtn:SetScript("OnLeave", function(self)
@@ -1378,7 +1385,7 @@ function ACO:CreateImportExportFrame()
     local helpText = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     helpText:SetPoint("BOTTOMLEFT", 15, 15)
     helpText:SetTextColor(0.6, 0.6, 0.6)
-    helpText:SetText("Format: IDs séparés par des virgules (ex: 12345,67890)")
+    helpText:SetText(ACO:Translate("IMPORT_HELP"))
     frame.helpText = helpText
 
     self.ExportFrame = frame
@@ -1390,7 +1397,7 @@ function ACO:ShowImportFrame()
         self:CreateImportExportFrame()
     end
     self.ExportFrame.editBox:SetText("")
-    self.ExportFrame.title:SetText("|cff00ff80Importer des conteneurs|r")
+    self.ExportFrame.title:SetText("|cff00ff80" .. ACO:Translate("IMPORT_FRAME_TITLE") .. "|r")
     self.ExportFrame.importBtn:Show()
     self.ExportFrame.clearImportBtn:Show()
     self.ExportFrame.helpText:Show()
@@ -1404,11 +1411,11 @@ function ACO:ShowExportFrame()
     end
     local exportStr = self:ExportContainers()
     if exportStr == "" then
-        self:Print("Aucun conteneur à exporter.")
+        self:Print(ACO:Translate("EXPORT_NONE"))
         return
     end
     self.ExportFrame.editBox:SetText(exportStr)
-    self.ExportFrame.title:SetText("|cff00ccffExporter les conteneurs|r")
+    self.ExportFrame.title:SetText("|cff00ccff" .. ACO:Translate("EXPORT_FRAME_TITLE") .. "|r")
     self.ExportFrame.importBtn:Hide()
     self.ExportFrame.clearImportBtn:Hide()
     self.ExportFrame.helpText:Hide()
