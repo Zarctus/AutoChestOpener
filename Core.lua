@@ -17,6 +17,10 @@ local tinsert, tremove, wipe = table.insert, table.remove, wipe
 local floor, max, min = math.floor, math.max, math.min
 local time, date = time, date
 
+-- WoW API globals that are frequently called
+local GetTime = GetTime
+local GetItemInfoInstant = GetItemInfoInstant
+
 -- WoW API upvalues
 local C_Container = C_Container
 local C_Item = C_Item
@@ -44,6 +48,21 @@ ACO.goldTracker = {
     goldBefore = 0,
     pendingItemID = nil,
 }
+
+-- Centralized open queue worker
+ACO.openQueue = {}
+ACO.queueTicker = nil
+ACO.queueNextAllowedAt = 0
+ACO.queueOpenInterval = 0.25 -- seconds between uses to avoid server/UI spam
+
+-- Combat deferral (itemID -> count)
+ACO.combatQueue = {}
+
+-- Incremental bag tracking (robust new-item detection + targeted scans)
+ACO.dirtyBags = {}
+ACO.scanScheduled = false
+ACO.lastBagCountsByBag = {}   -- [bagID] = { [itemID] = totalCountInBag }
+ACO.bagSlotsByBag = {}        -- [bagID] = { [itemID] = { {slot=, hyperlink=}... } }
 
 -- Default settings
 local defaults = {
@@ -141,17 +160,23 @@ function ACO:IsContainerItem(itemID)
         return true
     end
 
+    -- Check cache FIRST (avoid repeated expensive checks during bag scans)
+    if self.containerCache[itemID] ~= nil then
+        return self.containerCache[itemID]
+    end
+
     -- Exclude equippable items (bags, armors, weapons) to avoid treating
     -- craftable/equipable bags as openable containers.
-    local equipLoc = select(9, GetItemInfo(itemID))
+    local equipLoc
+    if GetItemInfoInstant then
+        equipLoc = select(9, GetItemInfoInstant(itemID))
+    end
+    if not equipLoc then
+        equipLoc = select(9, GetItemInfo(itemID))
+    end
     if equipLoc and equipLoc ~= "" then
         self.containerCache[itemID] = false
         return false
-    end
-    
-    -- Check cache
-    if self.containerCache[itemID] ~= nil then
-        return self.containerCache[itemID]
     end
     
     -- Check if item has "Open" as a spell (can be opened)
@@ -265,13 +290,50 @@ function ACO:CanOpenItem(itemID)
     return self:IsContainerItem(itemID)
 end
 
+-- Can we enqueue/open this item type? (no combat check)
+function ACO:CanQueueContainerItem(itemID)
+    if not itemID or not self.db then return false end
+    if self.db.blacklist and self.db.blacklist[itemID] then
+        return false
+    end
+    return self:IsContainerItem(itemID)
+end
+
+-- Tracked inventory bags (includes reagent bag when available)
+function ACO:GetTrackedBags()
+    if self._trackedBags then
+        return self._trackedBags
+    end
+
+    local bags = {0, 1, 2, 3, 4}
+    local reagentBag = (Enum and Enum.BagIndex and Enum.BagIndex.ReagentBag) or 5
+    local already = false
+    for _, b in ipairs(bags) do
+        if b == reagentBag then
+            already = true
+            break
+        end
+    end
+    if reagentBag and not already then
+        tinsert(bags, reagentBag)
+    end
+
+    self._trackedBags = bags
+    -- Build a set for quick membership checks
+    self._trackedBagSet = {}
+    for _, b in ipairs(bags) do
+        self._trackedBagSet[b] = true
+    end
+    return bags
+end
+
 -- ============================================================================
 -- ITEM OPENING LOGIC
 -- ============================================================================
 
 function ACO:FindItemInBags(itemID)
-    for bag = 0, 4 do
-        local numSlots = C_Container.GetContainerNumSlots(bag)
+    for _, bag in ipairs(self:GetTrackedBags()) do
+        local numSlots = C_Container.GetContainerNumSlots(bag) or 0
         for slot = 1, numSlots do
             local info = C_Container.GetContainerItemInfo(bag, slot)
             if info and info.itemID == itemID then
@@ -282,100 +344,175 @@ function ACO:FindItemInBags(itemID)
     return nil
 end
 
-function ACO:OpenItem(itemID)
-    if InCombatLockdown() then
-        self:Debug("Cannot open item in combat, queuing...")
-        tinsert(self.itemQueue, itemID)
-        return false
+-- Try to use an item from a specific bag/slot.
+-- Returns: true on success, false + reason ("MISSING" | "LOCKED" | "MISMATCH")
+function ACO:UseContainerFromBagSlot(itemID, bag, slot, itemLink)
+    if not bag or not slot then
+        return false, "MISSING"
     end
-    
-    local bag, slot, info = self:FindItemInBags(itemID)
-    if not bag then
-        self:Debug("Item not found in bags: " .. itemID)
-        return false
+
+    local info = C_Container.GetContainerItemInfo(bag, slot)
+    if not info then
+        return false, "MISSING"
     end
-    
+    if info.itemID ~= itemID then
+        return false, "MISMATCH"
+    end
+    if info.isLocked then
+        return false, "LOCKED"
+    end
+
     -- Notify Zarctus_Gold before opening (for proper gold tracking)
-    local itemName = info and info.itemName or nil
-    self:NotifyZarctusGold(itemID, itemName)
-    
-    -- Use the item
-    C_Container.UseContainerItem(bag, slot)
-    
-    -- Record statistics and history
-    self:RecordOpening(itemID)
-    
-    if self.db.showNotifications then
-        local itemLink = self:FormatItemLink(itemID)
-        self:Print(ACO:Translate("OPENING", itemLink))
+    local itemName = info.itemName
+    if not itemName and info.hyperlink then
+        itemName = info.hyperlink:match("%[(.-)%]")
     end
-    
-    if self.db.notificationSound then
+    self:NotifyZarctusGold(itemID, itemName)
+
+    C_Container.UseContainerItem(bag, slot)
+    self:RecordOpening(itemID)
+
+    if self.db and self.db.showNotifications then
+        local link = itemLink or info.hyperlink or self:FormatItemLink(itemID)
+        self:Print(ACO:Translate("OPENING", link))
+    end
+
+    if self.db and self.db.notificationSound then
         PlaySound(self.SOUNDS.OPEN)
     end
-    
+
     return true
 end
 
--- Track pending slots instead of just itemIDs to support multiple same items
-ACO.pendingSlots = {}
+function ACO:StartQueueWorker()
+    if self.queueTicker then return end
 
-function ACO:QueueItem(itemID, itemLink, bag, slot)
-    if not self.db.enabled then return end
-    if not self:CanOpenItem(itemID) then 
-        self:Debug("CanOpenItem returned false for: " .. itemID)
-        return 
+    local selfRef = self
+    self.queueTicker = C_Timer.NewTicker(0.1, function()
+        selfRef:ProcessQueueTick()
+    end)
+end
+
+function ACO:StopQueueWorker()
+    if self.queueTicker then
+        self.queueTicker:Cancel()
+        self.queueTicker = nil
     end
-    
-    -- Use bag+slot as unique key if provided, otherwise use itemID
-    local pendingKey = (bag and slot) and (bag .. "_" .. slot) or tostring(itemID)
-    
-    -- Don't queue if this specific slot is already pending
-    if self.pendingSlots[pendingKey] then
-        self:Debug("Slot already pending: " .. pendingKey)
+end
+
+-- Add an open request to the centralized queue
+function ACO:EnqueueOpen(itemID, bag, slot, itemLink, executeAt, source)
+    if not itemID or not self.db then return end
+    if not self:CanQueueContainerItem(itemID) then return end
+
+    -- In combat: defer
+    if InCombatLockdown() then
+        self.combatQueue[itemID] = (self.combatQueue[itemID] or 0) + 1
         return
     end
-    
-    self.pendingSlots[pendingKey] = true
-    self.pendingItems[itemID] = (self.pendingItems[itemID] or 0) + 1
-    local delay = self.db.delay
-    
+
+    local now = GetTime()
+    local entry = {
+        itemID = itemID,
+        bag = bag,
+        slot = slot,
+        link = itemLink,
+        executeAt = executeAt or now,
+        source = source or "AUTO",
+        tries = 0,
+    }
+    tinsert(self.openQueue, entry)
+    self:StartQueueWorker()
+end
+
+function ACO:ProcessQueueTick()
+    if #self.openQueue == 0 then
+        self:StopQueueWorker()
+        return
+    end
+
+    if InCombatLockdown() then
+        return
+    end
+
+    local now = GetTime()
+    if now < (self.queueNextAllowedAt or 0) then
+        return
+    end
+
+    local entry = self.openQueue[1]
+    if entry.executeAt and now < entry.executeAt then
+        return
+    end
+
+    -- Pop the entry
+    tremove(self.openQueue, 1)
+
+    -- Validate still openable (blacklist can change)
+    if not self:CanQueueContainerItem(entry.itemID) then
+        return
+    end
+
+    -- Try preferred slot first, then fallback find
+    local ok, reason = self:UseContainerFromBagSlot(entry.itemID, entry.bag, entry.slot, entry.link)
+    if not ok then
+        local bag, slot, info = self:FindItemInBags(entry.itemID)
+        if bag then
+            entry.bag, entry.slot = bag, slot
+            entry.link = info and info.hyperlink or entry.link
+            ok, reason = self:UseContainerFromBagSlot(entry.itemID, bag, slot, entry.link)
+        end
+    end
+
+    if ok then
+        self.queueNextAllowedAt = now + (self.queueOpenInterval or 0.25)
+        return
+    end
+
+    -- LOCKED -> retry later (quick backoff). Missing/mismatch -> drop.
+    if reason == "LOCKED" then
+        entry.tries = (entry.tries or 0) + 1
+        if entry.tries <= 25 then
+            entry.executeAt = now + 0.4
+            tinsert(self.openQueue, entry)
+            self:StartQueueWorker()
+        end
+    end
+end
+
+-- Public: open one container ASAP (uses the queue worker for lock/backoff handling)
+function ACO:OpenItem(itemID)
+    if not itemID or not self.db then return false end
+    self:EnqueueOpen(itemID, nil, nil, nil, GetTime(), "MANUAL")
+    return true
+end
+
+-- Public: queue an item (optionally multiple times) after the user's delay
+function ACO:QueueItem(itemID, itemLink, bag, slot, count)
+    if not self.db or not self.db.enabled then return end
+    if not itemID then return end
+    if not self:CanQueueContainerItem(itemID) then
+        self:Debug("CanQueueContainerItem returned false for: " .. itemID)
+        return
+    end
+
+    count = max(1, tonumber(count) or 1)
+    local delay = self.db.delay or 0
+    local executeAt = GetTime() + delay
+
     if self.db.showNotifications then
         local link = itemLink or self:FormatItemLink(itemID)
-        self:Print(ACO:Translate("OPENING_IN_SECONDS", link, delay))
+        -- If we enqueue multiple, avoid spamming the same message xN
+        if count == 1 then
+            self:Print(ACO:Translate("OPENING_IN_SECONDS", link, delay))
+        else
+            self:Print(ACO:Translate("OPENING_IN_SECONDS", link .. " x" .. count, delay))
+        end
     end
-    
-    -- Schedule opening
-    local selfRef = self
-    local targetBag, targetSlot = bag, slot
-    C_Timer.After(delay, function()
-        selfRef.pendingSlots[pendingKey] = nil
-        selfRef.pendingItems[itemID] = (selfRef.pendingItems[itemID] or 1) - 1
-        if selfRef.pendingItems[itemID] <= 0 then
-            selfRef.pendingItems[itemID] = nil
-        end
-        
-        if selfRef:CanOpenItem(itemID) then
-            -- Try to open from specific slot first, fallback to any slot with this item
-                    if targetBag and targetSlot then
-                local info = C_Container.GetContainerItemInfo(targetBag, targetSlot)
-                if info and info.itemID == itemID then
-                    selfRef:NotifyZarctusGold(itemID, info.itemName)
-                    C_Container.UseContainerItem(targetBag, targetSlot)
-                    selfRef:RecordOpening(itemID)
-                    if selfRef.db.showNotifications then
-                        selfRef:Print(ACO:Translate("OPENING", itemLink or selfRef:FormatItemLink(itemID)))
-                    end
-                    if selfRef.db.notificationSound then
-                        PlaySound(selfRef.SOUNDS.OPEN)
-                    end
-                    return
-                end
-            end
-            -- Fallback: find any instance of this item
-            selfRef:OpenItem(itemID)
-        end
-    end)
+
+    for i = 1, count do
+        self:EnqueueOpen(itemID, bag, slot, itemLink, executeAt, "AUTO")
+    end
 end
 
 -- ============================================================================
@@ -392,9 +529,9 @@ function ACO:OpenAllContainers()
     local toOpen = {}
     local containers = self.db.containers
     
-    -- Collect all containers in bags (optimisé avec cache local)
-    for bag = 0, 4 do
-        local numSlots = C_Container.GetContainerNumSlots(bag)
+    -- Collect all containers in bags (tracked list + reagent bag)
+    for _, bag in ipairs(self:GetTrackedBags()) do
+        local numSlots = C_Container.GetContainerNumSlots(bag) or 0
         for slot = 1, numSlots do
             local info = C_Container.GetContainerItemInfo(bag, slot)
             if info and info.itemID and containers[info.itemID] then
@@ -408,36 +545,18 @@ function ACO:OpenAllContainers()
         return 0
     end
     
-    -- Open with delay between each (0.5s pour éviter le spam)
-    local delayBetween = 0.5
-    local totalCount = #toOpen
-    local showNotif = self.db.showNotifications
-    local selfRef = self
-    
+    -- Enqueue with delay between each to avoid spam
+    local delayBetween = 0.35
+    local startAt = GetTime()
+
     for i, data in ipairs(toOpen) do
-        C_Timer.After((i - 1) * delayBetween, function()
-            if not InCombatLockdown() then
-                -- Notify Zarctus_Gold before opening (for proper gold tracking)
-                local itemName = data.link and data.link:match("%[(.-)%]") or nil
-                selfRef:NotifyZarctusGold(data.itemID, itemName)
-                
-                C_Container.UseContainerItem(data.bag, data.slot)
-                
-                -- Record statistics and history
-                selfRef:RecordOpening(data.itemID)
-                
-                opened = opened + 1
-                if showNotif then
-                    selfRef:Print(ACO:Translate("OPENING_COUNT", data.link or selfRef:FormatItemLink(data.itemID), i, totalCount))
-                end
-            end
-        end)
+        self:EnqueueOpen(data.itemID, data.bag, data.slot, data.link, startAt + (i - 1) * delayBetween, "OPENALL")
     end
-    
-    if self.db.notificationSound then
-        PlaySound(self.SOUNDS.OPEN)
+
+    if self.db.showNotifications then
+        self:Print(ACO:Translate("OPEN_ALL_RESULT", #toOpen))
     end
-    
+
     return #toOpen
 end
 
@@ -483,15 +602,18 @@ function ACO:QueueExistingContainers(itemID)
     if not itemID then return 0 end
     
     local count = 0
-    for bag = 0, 4 do
-        local numSlots = C_Container.GetContainerNumSlots(bag)
+    if not self:CanQueueContainerItem(itemID) then
+        return 0
+    end
+
+    for _, bag in ipairs(self:GetTrackedBags()) do
+        local numSlots = C_Container.GetContainerNumSlots(bag) or 0
         for slot = 1, numSlots do
             local info = C_Container.GetContainerItemInfo(bag, slot)
             if info and info.itemID == itemID then
-                if not self.pendingItems[itemID] and self:CanOpenItem(itemID) then
-                    self:QueueItem(itemID, info.hyperlink)
-                    count = count + 1
-                end
+                local qty = info.stackCount or 1
+                self:QueueItem(itemID, info.hyperlink, bag, slot, qty)
+                count = count + qty
             end
         end
     end
@@ -877,7 +999,7 @@ end
 events["PLAYER_ENTERING_WORLD"] = function(self, isInitialLogin, isReloadingUi)
     -- Initialize bag state after a short delay without triggering openings
     C_Timer.After(1, function()
-        if ACO.db and ACO.db.enabled then
+        if ACO.db then
             ACO:Debug("Initialisation de l'état des sacs au chargement...")
             ACO:InitializeBagState()
             ACO.bagStateInitialized = true
@@ -886,99 +1008,163 @@ events["PLAYER_ENTERING_WORLD"] = function(self, isInitialLogin, isReloadingUi)
     end)
 end
 
+events["BAG_UPDATE"] = function(self, bagID)
+    if not ACO.bagStateInitialized then return end
+    ACO:MarkBagDirty(bagID)
+end
+
 events["BAG_UPDATE_DELAYED"] = function(self)
     -- Only scan if bag state has been initialized (prevents false positives at login)
     if not ACO.bagStateInitialized then
         ACO:Debug("BAG_UPDATE_DELAYED ignoré - état des sacs non initialisé")
         return
     end
-    -- Check for new items in bags
-    ACO:ScanBagsForContainers()
+    -- Prefer targeted scan: if BAG_UPDATE already marked dirty bags, just ensure a scan happens.
+    -- If nothing is dirty (some UI actions don't fire BAG_UPDATE consistently), fallback to full inventory.
+    if next(ACO.dirtyBags) then
+        ACO:ScheduleBagScan()
+    else
+        ACO:MarkAllBagsDirty()
+    end
 end
 
 events["PLAYER_REGEN_ENABLED"] = function(self)
-    -- Process queued items after leaving combat
-    for _, itemID in ipairs(ACO.itemQueue) do
-        if ACO:CanOpenItem(itemID) then
-            ACO:QueueItem(itemID)
+    -- Process queued items after leaving combat (preserves stack counts)
+    if not ACO.db then return end
+    for itemID, qty in pairs(ACO.combatQueue) do
+        if qty and qty > 0 and ACO:CanQueueContainerItem(itemID) then
+            ACO:QueueItem(itemID, nil, nil, nil, qty)
         end
     end
-    wipe(ACO.itemQueue)
+    wipe(ACO.combatQueue)
 end
 
--- Track recently seen items to detect new ones
-ACO.lastBagState = {}
+-- ============================================================================
+-- BAG SCANNING (robust new-item detection, stack support, targeted scans)
+-- ============================================================================
 
--- Initialize bag state without triggering any openings (for login/reload)
+-- Snapshot one bag: counts per itemID (stack-aware) + slots list per itemID
+function ACO:ScanBagSnapshot(bagID)
+    local counts = {}
+    local slotsByItem = {}
+
+    local numSlots = C_Container.GetContainerNumSlots(bagID) or 0
+    for slot = 1, numSlots do
+        local info = C_Container.GetContainerItemInfo(bagID, slot)
+        if info and info.itemID then
+            local itemID = info.itemID
+            local qty = info.stackCount or 1
+            counts[itemID] = (counts[itemID] or 0) + qty
+            slotsByItem[itemID] = slotsByItem[itemID] or {}
+            tinsert(slotsByItem[itemID], {
+                slot = slot,
+                hyperlink = info.hyperlink,
+                stackCount = qty,
+                isLocked = info.isLocked,
+            })
+        end
+    end
+
+    return counts, slotsByItem
+end
+
 function ACO:InitializeBagState()
-    if not self.db or not self.db.enabled then return end
-    
-    local currentBagState = {}
-    
-    for bag = 0, 4 do
-        local numSlots = C_Container.GetContainerNumSlots(bag)
-        for slot = 1, numSlots do
-            local info = C_Container.GetContainerItemInfo(bag, slot)
-            if info and info.itemID then
-                local key = bag .. "_" .. slot
-                currentBagState[key] = info.itemID
+    if not self.db then return end
+
+    wipe(self.dirtyBags)
+    wipe(self.lastBagCountsByBag)
+    wipe(self.bagSlotsByBag)
+
+    local totalItems = 0
+    for _, bag in ipairs(self:GetTrackedBags()) do
+        local counts, slotsByItem = self:ScanBagSnapshot(bag)
+        self.lastBagCountsByBag[bag] = counts
+        self.bagSlotsByBag[bag] = slotsByItem
+        for _, qty in pairs(counts) do
+            totalItems = totalItems + qty
+        end
+    end
+    self:Debug("État des sacs initialisé (quantités) : " .. totalItems)
+end
+
+function ACO:MarkBagDirty(bagID)
+    if not bagID or type(bagID) ~= "number" then return end
+    if bagID < 0 then return end
+    if not self._trackedBagSet or not self._trackedBagSet[bagID] then return end
+    self.dirtyBags[bagID] = true
+    self:ScheduleBagScan()
+end
+
+function ACO:MarkAllBagsDirty()
+    if not self.db then return end
+    for _, bag in ipairs(self:GetTrackedBags()) do
+        self.dirtyBags[bag] = true
+    end
+    self:ScheduleBagScan()
+end
+
+function ACO:ScheduleBagScan()
+    if self.scanScheduled then return end
+    self.scanScheduled = true
+
+    local selfRef = self
+    local throttle = self.scanThrottle or 0.25
+    C_Timer.After(throttle, function()
+        selfRef.scanScheduled = false
+        selfRef:ProcessDirtyBags()
+    end)
+end
+
+function ACO:ProcessDirtyBags()
+    if not self.db then return end
+    if not next(self.dirtyBags) then return end
+
+    -- Aggregate diffs across all dirty bags (prevents false positives on moves/sorts)
+    local netDelta = {}
+    local slotHints = {}
+
+    for bag in pairs(self.dirtyBags) do
+        local oldCounts = self.lastBagCountsByBag[bag] or {}
+        local newCounts, newSlotsByItem = self:ScanBagSnapshot(bag)
+
+        self.lastBagCountsByBag[bag] = newCounts
+        self.bagSlotsByBag[bag] = newSlotsByItem
+
+        -- old -> new
+        for itemID, oldQty in pairs(oldCounts) do
+            local newQty = newCounts[itemID] or 0
+            if newQty ~= oldQty then
+                netDelta[itemID] = (netDelta[itemID] or 0) + (newQty - oldQty)
             end
         end
-    end
-    
-    self.lastBagState = currentBagState
-    self:Debug("État des sacs initialisé avec " .. self:CountTableElements(currentBagState) .. " items")
-end
-
-function ACO:CountTableElements(tbl)
-    local count = 0
-    for _ in pairs(tbl) do
-        count = count + 1
-    end
-    return count
-end
-
-function ACO:ScanBagsForContainers()
-    if not self.db or not self.db.enabled then return end
-    
-    local currentBagState = {}
-    local lastState = self.lastBagState
-    local userContainers = self.db.containers
-    
-    for bag = 0, 4 do
-        local numSlots = C_Container.GetContainerNumSlots(bag)
-        for slot = 1, numSlots do
-            local info = C_Container.GetContainerItemInfo(bag, slot)
-            if info and info.itemID then
-                local key = bag .. "_" .. slot
-                local itemID = info.itemID
-                currentBagState[key] = itemID
-                
-                -- Check if this specific slot already has a pending open
-                if self.pendingSlots[key] then
-                    -- Already pending, skip
-                elseif self:CanOpenItem(itemID) then
-                    -- ONLY open if this is a genuinely NEW item (just appeared in this slot)
-                    local isNewItem = (lastState[key] ~= itemID)
-                    
-                    if isNewItem then
-                        local isUserContainer = userContainers[itemID]
-                        local isAutoDetected = self:IsContainerItem(itemID)
-                        
-                        if isUserContainer then
-                            self:Debug("Nouveau container utilisateur détecté: " .. itemID .. " at " .. key)
-                            self:QueueItem(itemID, info.hyperlink, bag, slot)
-                        elseif isAutoDetected then
-                            self:Debug("Nouveau container auto-détecté: " .. itemID .. " at " .. key)
-                            self:QueueItem(itemID, info.hyperlink, bag, slot)
-                        end
-                    end
+        -- new keys not in old
+        for itemID, newQty in pairs(newCounts) do
+            if oldCounts[itemID] == nil then
+                netDelta[itemID] = (netDelta[itemID] or 0) + newQty
+            end
+            if not slotHints[itemID] then
+                local l = newSlotsByItem[itemID]
+                if l and l[1] then
+                    slotHints[itemID] = { bag = bag, slot = l[1].slot, link = l[1].hyperlink }
                 end
             end
         end
     end
-    
-    self.lastBagState = currentBagState
+
+    wipe(self.dirtyBags)
+
+    -- Queue only positive gains (stack-aware). If addon disabled, we still update state but don't queue.
+    if not self.db.enabled then
+        return
+    end
+
+    for itemID, delta in pairs(netDelta) do
+        if delta and delta > 0 and self:CanQueueContainerItem(itemID) then
+            local hint = slotHints[itemID]
+            self:Debug(format("Gain détecté: %d x%d", itemID, delta))
+            self:QueueItem(itemID, hint and hint.link, hint and hint.bag, hint and hint.slot, delta)
+        end
+    end
 end
 
 EventFrame:SetScript("OnEvent", function(self, event, ...)
@@ -1099,10 +1285,13 @@ SlashCmdList["AUTOCHESTOPENER"] = function(msg)
     elseif cmd == "scan" then
         -- Force a bag scan
         ACO.containerCache = {} -- Clear cache
-        ACO.lastBagState = {} -- Reset bag state to detect all items as "new"
-        ACO.pendingSlots = {} -- Clear pending slots
-        wipe(ACO.pendingItems) -- Clear pending items
-        ACO:ScanBagsForContainers()
+        wipe(ACO.lastBagCountsByBag)
+        wipe(ACO.bagSlotsByBag)
+        wipe(ACO.dirtyBags)
+        for _, bag in ipairs(ACO:GetTrackedBags()) do
+            ACO.dirtyBags[bag] = true
+        end
+        ACO:ProcessDirtyBags()
         ACO:Print(ACO:Translate("SCAN_DONE"))
     elseif cmd == "" or cmd == "config" or cmd == "options" then
         if ACO.UI and ACO.UI.Toggle then
