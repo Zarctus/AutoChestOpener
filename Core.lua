@@ -40,7 +40,9 @@ local UnitName = UnitName
 -- ============================================================================
 
 ACO.name = addonName
-ACO.version = "1.3.0"
+-- Try to read version from the AddOn TOC metadata (## Version:)
+local tocVersion = (GetAddOnMetadata and GetAddOnMetadata(addonName, "Version")) or nil
+ACO.version = (tocVersion and tocVersion ~= "" ) and tocVersion or "1.3.0"
 ACO.pendingItems = {}
 ACO.itemQueue = {}
 ACO.goldTracker = {
