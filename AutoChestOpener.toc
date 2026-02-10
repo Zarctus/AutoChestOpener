@@ -10,7 +10,7 @@
 ## X-Category: Inventory
 ## X-License: MIT
 ## X-Curse-Project-ID: 1456201
-## X-WoWI-ID: 
+## X-Wago-ID: aNDMy86o
 
 ## OptionalDeps: ElvUI, Zarctus_Gold
 
