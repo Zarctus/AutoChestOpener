@@ -9,7 +9,7 @@
 ## IconTexture: Interface\AddOns\AutoChestOpener\textures\treasure.tga
 ## X-Category: Inventory
 ## X-License: MIT
-## X-Curse-Project-ID: 
+## X-Curse-Project-ID: 1456201
 ## X-WoWI-ID: 
 
 ## OptionalDeps: ElvUI, Zarctus_Gold

@@ -1,0 +1,22 @@
+name: Package and release
+
+on:
+  push:
+    tags:
+      - '**'   # déclenche à chaque tag
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    env:
+      CF_API_KEY: ${{ secrets.CF_API_KEY }}
+      GITHUB_OAUTH: ${{ secrets.GITHUB_TOKEN }} # optionnel, utile si tu veux aussi une GitHub Release
+
+    steps:
+      - name: Clone project
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # nécessaire pour l’historique/changelog
+
+      - name: Package and release
+        uses: BigWigsMods/packager@v2
