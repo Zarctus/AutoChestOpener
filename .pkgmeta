@@ -1,0 +1,11 @@
+package-as: AutoChestOpener
+
+ignore:
+  - .github
+  - .vscode
+  - "*.zip"
+  - "*.rar"
+  - "*.7z"
+  - .gitignore
+  - curse.md
+  - README.md
