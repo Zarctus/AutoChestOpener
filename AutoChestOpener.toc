@@ -1,0 +1,22 @@
+## Interface: 120000, 120001
+## Title: |cff00ccffAuto Chest Opener|r
+## Notes: Automatically opens chests, bags, and containers after receiving them
+## Notes-frFR: Ouvre automatiquement les coffres, sacs et conteneurs après réception
+## Author: Zarctus
+## Category: Inventory
+## Version: v1.3.2
+## SavedVariables: AutoChestOpenerDB
+## IconTexture: Interface\AddOns\AutoChestOpener\textures\treasure.tga
+## X-Category: Inventory
+## X-License: MIT
+## X-Curse-Project-ID: 1456201
+## X-Wago-ID: aNDMy86o
+
+## OptionalDeps: ElvUI, Zarctus_Gold
+
+Libs\LibStub\LibStub.lua
+
+Locales.lua
+
+Core.lua
+UI.lua
