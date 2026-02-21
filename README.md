@@ -1,6 +1,6 @@
 # Auto Chest Opener
 
-![Version](https://img.shields.io/badge/version-1.3.3-blue)
+![Version](https://img.shields.io/badge/version-1.3.5-blue)
 ![WoW Version](https://img.shields.io/badge/WoW-12.0.0-orange)
 ![License](https://img.shields.io/badge/license-MIT-green)
 

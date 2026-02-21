@@ -4,7 +4,7 @@
 ## Notes-frFR: Ouvre automatiquement les coffres, sacs et conteneurs après réception
 ## Author: Zarctus
 ## Category: Inventory
-## Version: 1.3.4
+## Version: 1.3.5
 ## SavedVariables: AutoChestOpenerDB
 ## IconTexture: Interface\AddOns\AutoChestOpener\textures\treasure.tga
 ## X-Category: Inventory

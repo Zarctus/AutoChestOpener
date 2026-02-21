@@ -1,5 +1,9 @@
 # Auto Chest Opener
 
+## 1.3.5 (local patch)
+- Correction: certains conteneurs ne s'ouvraient pas si les données d'objet n'étaient pas encore en cache (ex: items nouveaux/non consultés). Désormais, l'addon diffère la classification et réessaie automatiquement dès que l'item est chargé.
+- Amélioration: la file d'ouverture est maintenant triée par temps d'exécution (un item "manuel"/immédiat ne reste plus bloqué derrière un item retardé).
+- Robustesse: détection texte en recherche "plain" + normalisation des apostrophes (’ vs ').
 ## 1.3.4 (local patch)
 - Correction: enregistrement des événements en mode safe (évite l'erreur "unknown event" sur certaines versions, ex: VOID_STORAGE_CLOSE).
 

@@ -1,7 +1,7 @@
 --[[
     Auto Chest Opener - Core Module
     Automatically opens chests, bags and containers after receiving them
-    Version: 1.3.4
+    Version: 1.3.5
 ]]
 
 local addonName, ACO = ...
@@ -34,6 +34,7 @@ local CopyTable = CopyTable
 local strsplit = strsplit
 local GetMoney = GetMoney
 local UnitName = UnitName
+local Item = Item
 
 -- ============================================================================
 -- ADDON INITIALIZATION
@@ -47,7 +48,7 @@ local tocVersion = (GetAddOnMetadata and GetAddOnMetadata(addonName, "Version"))
 if tocVersion == "@project-version@" then
     tocVersion = nil
 end
-ACO.version = (tocVersion and tocVersion ~= "" ) and tocVersion or "1.3.3"
+ACO.version = (tocVersion and tocVersion ~= "" ) and tocVersion or "1.3.5"
 ACO.pendingItems = {}
 ACO.itemQueue = {}
 ACO.goldTracker = {
@@ -64,6 +65,10 @@ ACO.queueOpenInterval = 0.25 -- seconds between uses to avoid server/UI spam
 
 -- Combat deferral (itemID -> count)
 ACO.combatQueue = {}
+
+-- Item data async (évite de rater certains conteneurs si les données de l'objet ne sont pas encore en cache)
+ACO.pendingItemLoads = {}        -- [itemID] = true si un callback de chargement est en cours
+ACO.pendingContainerGains = {}   -- [itemID] = { count=, link=, bag=, slot=, firstSeen=, lastSeen= }
 
 -- UI / Interaction blockers (to prevent accidental selling/moving items instead of opening)
 -- When any of these is true, the open queue worker pauses and resumes automatically.
@@ -256,21 +261,93 @@ end
 -- Cache pour les items vérifiés (évite les vérifications répétées)
 ACO.containerCache = {}
 
+
+-- ============================================================================
+-- TEXT / ITEM-DATA HELPERS
+-- ============================================================================
+
+local function NormalizeText(s)
+    if not s then return nil end
+    -- string.lower() côté WoW est surtout ASCII, mais suffisant ici (les mots-clés sont en minuscules)
+    s = lower(s)
+    -- Normalise quelques variantes d'apostrophes (’ vs ' etc.)
+    s = s:gsub("’", "'"):gsub("`", "'"):gsub("´", "'"):gsub("ʼ", "'")
+    return s
+end
+
+local function ContainsAnyPlain(haystack, needles)
+    if not haystack then return false end
+    for _, n in ipairs(needles) do
+        if n and n ~= "" and haystack:find(n, 1, true) then
+            return true
+        end
+    end
+    return false
+end
+
+-- Certaines infos (nom / spell "Use:") peuvent être nil si l'item n'est pas encore en cache.
+-- On évite alors de "cacher = false" trop tôt, sinon certains conteneurs ne seront jamais reconnus.
+function ACO:IsItemDataAvailable(itemID)
+    if not itemID then return false end
+    if C_Item and C_Item.IsItemDataCachedByID then
+        return C_Item.IsItemDataCachedByID(itemID)
+    end
+    if C_Item and C_Item.GetItemNameByID then
+        local name = C_Item.GetItemNameByID(itemID)
+        if name then return true end
+    end
+    if GetItemInfo then
+        local name = GetItemInfo(itemID)
+        if name then return true end
+    end
+    return false
+end
+
+
+-- Mots-clés (recherche "plain", pas de patterns Lua) pour détecter des objets ouvrables.
+-- Note: On reste volontairement assez conservateur pour éviter les faux positifs.
+local OPEN_PATTERNS = {
+    "open",      -- EN: open, opens, opening
+    "ouvr",      -- FR: ouvrir, ouvrez, ouvrant, ouvre
+    "öffn",      -- DE: öffnen, öffnet
+    "abr",       -- ES: abrir, abre
+    "откр",      -- RU: открыть, открывать
+    "열",        -- KR: 열기
+}
+
+local OPEN_KEYWORDS = {
+    "unwrap", "déballer", "auspacken",  -- wrapped items
+    "use", "utiliser", "utilisez",      -- some containers use "use"
+    "loot", "piller",                   -- loot keywords
+    "salvage", "récupér",               -- salvage crates
+    "click", "cliqu",                   -- click to open
+}
+
+local CONTAINER_NAME_KEYWORDS = {
+    "cache", "coffre", "coffret", "chest", "crate", "caisse",
+    "sack", "sac", "sacoche",
+    "bag", "box", "boîte", "bundle", "lot",
+    "satchel",                           -- "Satchel of ..."
+    "treasure", "trésor", "salvage", "récupération",
+    "parcel", "colis", "package", "paquet",
+    "pouch", "bourse", "purse",
+}
+
+
 function ACO:IsContainerItem(itemID)
     if not itemID then return false end
-    
+
     -- Check user-defined containers (priorité absolue)
     if self.db and self.db.containers[itemID] then
         return true
     end
 
-    -- Check cache FIRST (avoid repeated expensive checks during bag scans)
+    -- Cache (évite des checks coûteux pendant les scans)
     if self.containerCache[itemID] ~= nil then
         return self.containerCache[itemID]
     end
 
-    -- Exclude equippable items (bags, armors, weapons) to avoid treating
-    -- craftable/equipable bags as openable containers.
+    -- Exclure les items équipables (sacs/armures/armes) pour éviter les faux positifs
     local equipLoc
     if GetItemInfoInstant then
         equipLoc = select(9, GetItemInfoInstant(itemID))
@@ -282,101 +359,41 @@ function ACO:IsContainerItem(itemID)
         self.containerCache[itemID] = false
         return false
     end
-    
-    -- Check if item has "Open" as a spell (can be opened)
-    local itemSpell = C_Item.GetItemSpell(itemID)
-    local itemName = C_Item.GetItemNameByID(itemID)
-    
-    self:Debug(format("Checking item %d: name='%s', spell='%s'", 
+
+    -- IMPORTANT: si l'item n'est pas encore en cache, certains appels (nom/spell) retournent nil.
+    -- Dans ce cas, on NE "cache" PAS false, sinon l'item ne sera jamais reconnu.
+    if not self:IsItemDataAvailable(itemID) then
+        return false
+    end
+
+    local itemSpell = (C_Item and C_Item.GetItemSpell) and C_Item.GetItemSpell(itemID) or nil
+    local itemName = (C_Item and C_Item.GetItemNameByID) and C_Item.GetItemNameByID(itemID) or nil
+
+    self:Debug(format("Checking item %d: name='%s', spell='%s'",
         itemID, itemName or "nil", itemSpell or "nil"))
-    
-    if itemSpell then
-        local spellName = lower(itemSpell)
-        
-        -- Use partial patterns (word roots) to catch all conjugations
-        -- "ouvr" catches: ouvrir, ouvrez, ouvrant, etc.
-        -- "open" catches: open, opens, opening, etc.
-        local openPatterns = {
-            "open",      -- EN: open, opens, opening
-            "ouvr",      -- FR: ouvrir, ouvrez, ouvrant, ouvre
-            "öffn",      -- DE: öffnen, öffnet
-            "abr",       -- ES: abrir, abre
-            "откр",      -- RU: открыть, открывать
-            "열",        -- KR: 열기
-        }
-        
-        local isContainer = false
-        for _, pattern in ipairs(openPatterns) do
-            if match(spellName, pattern) then
-                isContainer = true
-                break
-            end
-        end
-        
-        -- Additional keyword checks (exact or partial)
-        if not isContainer then
-            local openKeywords = {
-                "unwrap", "déballer", "auspacken",  -- For wrapped items
-                "use", "utiliser", "utilisez",      -- Some items use "use"
-                "loot", "piller",                   -- Loot keywords
-                "salvage", "récupér",               -- Salvage crates
-                "click", "cliqu",                   -- Click to open
-            }
-            for _, keyword in ipairs(openKeywords) do
-                if match(spellName, keyword) then
-                    isContainer = true
-                    break
-                end
-            end
-        end
-        
-        -- If spell found but not matched, check item name for container hints
-        if not isContainer then
-            local itemName = C_Item.GetItemNameByID(itemID)
-            if itemName then
-                local nameLower = lower(itemName)
-                local containerNames = {
-                    "cache", "coffre", "chest", "crate", "sack", "sac",
-                    "bag", "box", "boîte", "bundle", "lot",
-                    "treasure", "trésor", "salvage", "récupération",
-                    "parcel", "colis", "package", "paquet",
-                    "pouch", "bourse", "purse",  -- Money bags
-                }
-                for _, keyword in ipairs(containerNames) do
-                    if match(nameLower, keyword) then
-                        isContainer = true
-                        break
-                    end
-                end
-            end
-        end
-        
-        self.containerCache[itemID] = isContainer
-        return isContainer
-    end
-    
-    -- No spell found - check item name as fallback
-    local itemName = C_Item.GetItemNameByID(itemID)
-    if itemName then
-        local nameLower = lower(itemName)
-        local containerNames = {
-            "cache", "coffre", "chest", "crate", "sack", "sac",
-            "bag", "box", "boîte", "bundle", "lot",
-            "treasure", "trésor", "salvage", "récupération",
-            "parcel", "colis", "package", "paquet",
-            "pouch", "bourse", "purse",  -- Money bags
-        }
-        for _, keyword in ipairs(containerNames) do
-            if match(nameLower, keyword) then
-                self.containerCache[itemID] = true
-                return true
-            end
+
+    local isContainer = false
+
+    -- 1) Priorité au spell "Use:" (le plus fiable quand dispo)
+    if itemSpell and itemSpell ~= "" then
+        local spellLower = NormalizeText(itemSpell)
+        if spellLower and (ContainsAnyPlain(spellLower, OPEN_PATTERNS) or ContainsAnyPlain(spellLower, OPEN_KEYWORDS)) then
+            isContainer = true
         end
     end
-    
-    self.containerCache[itemID] = false
-    return false
+
+    -- 2) Fallback sur le nom de l'item (moins fiable, mais utile)
+    if not isContainer and itemName and itemName ~= "" then
+        local nameLower = NormalizeText(itemName)
+        if nameLower and ContainsAnyPlain(nameLower, CONTAINER_NAME_KEYWORDS) then
+            isContainer = true
+        end
+    end
+
+    self.containerCache[itemID] = isContainer
+    return isContainer
 end
+
 
 function ACO:CanOpenItem(itemID)
     if not itemID then return false end
@@ -505,6 +522,26 @@ function ACO:StopQueueWorker()
 end
 
 -- Add an open request to the centralized queue
+
+-- Insert an entry into openQueue sorted by executeAt (avoid "later" items blocking "soon" items)
+function ACO:InsertOpenQueueEntry(entry)
+    if not entry then return end
+    local q = self.openQueue
+    local t = entry.executeAt or 0
+
+    local n = #q
+    for i = 1, n do
+        local e = q[i]
+        local et = (e and e.executeAt) or 0
+        if t < et then
+            tinsert(q, i, entry)
+            return
+        end
+    end
+
+    tinsert(q, entry)
+end
+
 function ACO:EnqueueOpen(itemID, bag, slot, itemLink, executeAt, source)
     if not itemID or not self.db then return end
     if not self:CanQueueContainerItem(itemID) then return end
@@ -525,7 +562,7 @@ function ACO:EnqueueOpen(itemID, bag, slot, itemLink, executeAt, source)
         source = source or "AUTO",
         tries = 0,
     }
-    tinsert(self.openQueue, entry)
+    self:InsertOpenQueueEntry(entry)
     self:StartQueueWorker()
 end
 
@@ -582,7 +619,7 @@ function ACO:ProcessQueueTick()
         entry.tries = (entry.tries or 0) + 1
         if entry.tries <= 25 then
             entry.executeAt = now + 0.4
-            tinsert(self.openQueue, entry)
+            self:InsertOpenQueueEntry(entry)
             self:StartQueueWorker()
         end
     end
@@ -1289,6 +1326,83 @@ function ACO:ScheduleBagScan()
     end)
 end
 
+
+function ACO:DeferContainerClassification(itemID, delta, hint)
+    if not itemID or not delta or delta <= 0 then return end
+    if not self.db then return end
+
+    local now = GetTime()
+
+    -- Aggregate pending gains per itemID (stack-aware)
+    local p = self.pendingContainerGains[itemID]
+    if p then
+        p.count = (p.count or 0) + delta
+        p.lastSeen = now
+        if hint then
+            p.link = hint.link or p.link
+            p.bag = hint.bag or p.bag
+            p.slot = hint.slot or p.slot
+        end
+    else
+        self.pendingContainerGains[itemID] = {
+            count = delta,
+            link = hint and hint.link or nil,
+            bag = hint and hint.bag or nil,
+            slot = hint and hint.slot or nil,
+            firstSeen = now,
+            lastSeen = now,
+        }
+    end
+
+    -- One load request per itemID (avoid spam)
+    if self.pendingItemLoads[itemID] then
+        return
+    end
+    self.pendingItemLoads[itemID] = true
+
+    self:Debug(format("Item %d: données non en cache -> recheck auto au chargement (x%d)", itemID, delta))
+
+    local selfRef = self
+
+    local function OnLoaded()
+        selfRef.pendingItemLoads[itemID] = nil
+
+        local pending = selfRef.pendingContainerGains[itemID]
+        selfRef.pendingContainerGains[itemID] = nil
+
+        -- Addon could be disabled in the meantime
+        if not pending or not selfRef.db or not selfRef.db.enabled then
+            return
+        end
+
+        -- Force recalculation (au cas où on aurait tenté avant)
+        selfRef.containerCache[itemID] = nil
+
+        if selfRef:CanQueueContainerItem(itemID) then
+            selfRef:Debug(format("Item %d chargé -> queue ouverture x%d", itemID, pending.count or 1))
+            selfRef:QueueItem(itemID, pending.link, pending.bag, pending.slot, pending.count or 1)
+        else
+            selfRef:Debug(format("Item %d chargé -> pas un conteneur (ou blacklisté)", itemID))
+        end
+    end
+
+    -- Preferred: modern Item API
+    if Item and Item.CreateFromItemID then
+        local itemObj = Item:CreateFromItemID(itemID)
+        if itemObj and itemObj.ContinueOnItemLoad then
+            itemObj:ContinueOnItemLoad(OnLoaded)
+            return
+        end
+    end
+
+    -- Fallback: request + delayed retry
+    if C_Item and C_Item.RequestLoadItemDataByID then
+        C_Item.RequestLoadItemDataByID(itemID)
+    end
+    C_Timer.After(0.6, OnLoaded)
+end
+
+
 function ACO:ProcessDirtyBags()
     if not self.db then return end
     if not next(self.dirtyBags) then return end
@@ -1333,10 +1447,19 @@ function ACO:ProcessDirtyBags()
     end
 
     for itemID, delta in pairs(netDelta) do
-        if delta and delta > 0 and self:CanQueueContainerItem(itemID) then
-            local hint = slotHints[itemID]
-            self:Debug(format("Gain détecté: %d x%d", itemID, delta))
-            self:QueueItem(itemID, hint and hint.link, hint and hint.bag, hint and hint.slot, delta)
+        if delta and delta > 0 then
+            if self:CanQueueContainerItem(itemID) then
+                local hint = slotHints[itemID]
+                self:Debug(format("Gain détecté: %d x%d", itemID, delta))
+                self:QueueItem(itemID, hint and hint.link, hint and hint.bag, hint and hint.slot, delta)
+            else
+                -- Si l'item n'est pas encore en cache (nom/spell nil), on diffère la classification
+                -- et on réessaie automatiquement dès que les données de l'item sont chargées.
+                if not self:IsItemDataAvailable(itemID) then
+                    local hint = slotHints[itemID]
+                    self:DeferContainerClassification(itemID, delta, hint)
+                end
+            end
         end
     end
 end
@@ -1449,12 +1572,14 @@ SlashCmdList["AUTOCHESTOPENER"] = function(msg)
         if itemID then
             local itemName = C_Item.GetItemNameByID(itemID)
             local itemSpell = C_Item.GetItemSpell(itemID)
+            local dataCached = ACO:IsItemDataAvailable(itemID) and "Oui" or "Non"
             local isContainer = ACO:IsContainerItem(itemID)
             local canOpen = ACO:CanOpenItem(itemID)
             local inList = ACO.db.containers[itemID] and "Oui" or "Non"
             ACO:Print(format("--- Info Item %d ---", itemID))
             print(format("  Nom: %s", itemName or "Inconnu"))
             print(format("  Spell: %s", itemSpell or "Aucun"))
+            print(format("  Données en cache: %s", dataCached))
             print(format("  Dans la liste: %s", inList))
             print(format("  Détecté comme container: %s", isContainer and "Oui" or "Non"))
             print(format("  Peut être ouvert: %s", canOpen and "Oui" or "Non"))
