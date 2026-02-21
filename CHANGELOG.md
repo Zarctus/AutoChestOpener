@@ -1,5 +1,12 @@
 # Auto Chest Opener
 
+## 1.3.4 (local patch)
+- Correction: enregistrement des événements en mode safe (évite l'erreur "unknown event" sur certaines versions, ex: VOID_STORAGE_CLOSE).
+
+## 1.3.3 (local patch)
+- Pause automatique de l'ouverture quand vous êtes en combat ou qu'une fenêtre sensible est ouverte (marchand/banque/courrier/HV/échange).
+- Reprise automatique dès que possible, sans risque de vente/dépôt/attachement accidentel.
+
 ## [v1.3.2](https://github.com/Zarctus/AutoChestOpener/tree/v1.3.2) (2026-02-10)
 [Full Changelog](https://github.com/Zarctus/AutoChestOpener/compare/v1.3.1...v1.3.2) [Previous Releases](https://github.com/Zarctus/AutoChestOpener/releases)
 

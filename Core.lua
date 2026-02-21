@@ -1,7 +1,7 @@
 --[[
     Auto Chest Opener - Core Module
     Automatically opens chests, bags and containers after receiving them
-    Version: 1.3.0
+    Version: 1.3.4
 ]]
 
 local addonName, ACO = ...
@@ -42,7 +42,12 @@ local UnitName = UnitName
 ACO.name = addonName
 -- Try to read version from the AddOn TOC metadata (## Version:)
 local tocVersion = (GetAddOnMetadata and GetAddOnMetadata(addonName, "Version")) or nil
-ACO.version = (tocVersion and tocVersion ~= "" ) and tocVersion or "1.3.0"
+-- If packaged with a tool, the TOC can contain a placeholder like "@project-version@".
+-- Treat it as invalid and fallback to the hardcoded version.
+if tocVersion == "@project-version@" then
+    tocVersion = nil
+end
+ACO.version = (tocVersion and tocVersion ~= "" ) and tocVersion or "1.3.3"
 ACO.pendingItems = {}
 ACO.itemQueue = {}
 ACO.goldTracker = {
@@ -59,6 +64,103 @@ ACO.queueOpenInterval = 0.25 -- seconds between uses to avoid server/UI spam
 
 -- Combat deferral (itemID -> count)
 ACO.combatQueue = {}
+
+-- UI / Interaction blockers (to prevent accidental selling/moving items instead of opening)
+-- When any of these is true, the open queue worker pauses and resumes automatically.
+ACO.blockers = {
+    merchant = false,
+    trade = false,
+    auction = false,
+    bank = false,
+    mail = false,
+    guildbank = false,
+    voidstorage = false,
+}
+
+function ACO:SetBlocker(name, state)
+    if not name then return end
+    if not self.blockers then self.blockers = {} end
+    local old = self.blockers[name]
+    if old == state then return end
+    self.blockers[name] = state and true or false
+
+    if self.db and self.db.debugMode then
+        self:Debug(("Blocker '%s' -> %s"):format(tostring(name), tostring(self.blockers[name])))
+    end
+
+    -- When something closes, try to resume quickly (ProcessQueueTick will still re-check blockers).
+    if not self.blockers[name] then
+        self.queueNextAllowedAt = 0
+        self:StartQueueWorker()
+    end
+end
+
+function ACO:IsOpeningBlocked()
+    -- Combat first (hard block)
+    if InCombatLockdown and InCombatLockdown() then
+        return true, "COMBAT"
+    end
+
+    -- Merchant: right-click/use can SELL items when the merchant frame is open.
+    if (self.blockers and self.blockers.merchant) or (MerchantFrame and MerchantFrame.IsShown and MerchantFrame:IsShown()) then
+        return true, "MERCHANT"
+    end
+
+    -- Trade: right-click/use can MOVE items into trade window.
+    if (self.blockers and self.blockers.trade) or (TradeFrame and TradeFrame.IsShown and TradeFrame:IsShown()) then
+        return true, "TRADE"
+    end
+
+    -- Auction House: right-click/use can list/drag items or behave unexpectedly.
+    if (self.blockers and self.blockers.auction) or (AuctionHouseFrame and AuctionHouseFrame.IsShown and AuctionHouseFrame:IsShown()) then
+        return true, "AUCTION"
+    end
+
+    -- Mail: right-click/use can attach items to mail.
+    if (self.blockers and self.blockers.mail) or (MailFrame and MailFrame.IsShown and MailFrame:IsShown()) then
+        return true, "MAIL"
+    end
+
+    -- Bank / Guild Bank: right-click/use can deposit items instead of opening.
+    if (self.blockers and self.blockers.bank) or (BankFrame and BankFrame.IsShown and BankFrame:IsShown()) then
+        return true, "BANK"
+    end
+    if (self.blockers and self.blockers.guildbank) or (GuildBankFrame and GuildBankFrame.IsShown and GuildBankFrame:IsShown()) then
+        return true, "GUILDBANK"
+    end
+
+    -- Void storage (rare but safe to guard)
+    if (self.blockers and self.blockers.voidstorage) or (VoidStorageFrame and VoidStorageFrame.IsShown and VoidStorageFrame:IsShown()) then
+        return true, "VOIDSTORAGE"
+    end
+
+    return false, nil
+end
+
+-- Human-readable / localized reason for blockers (used in notifications)
+function ACO:GetBlockReasonText(reason)
+    if not reason then
+        return ACO:Translate("BLOCK_REASON_UNKNOWN")
+    end
+
+    local map = {
+        COMBAT = "BLOCK_REASON_COMBAT",
+        MERCHANT = "BLOCK_REASON_MERCHANT",
+        TRADE = "BLOCK_REASON_TRADE",
+        AUCTION = "BLOCK_REASON_AUCTION",
+        MAIL = "BLOCK_REASON_MAIL",
+        BANK = "BLOCK_REASON_BANK",
+        GUILDBANK = "BLOCK_REASON_GUILDBANK",
+        VOIDSTORAGE = "BLOCK_REASON_VOIDSTORAGE",
+    }
+
+    local key = map[reason]
+    if key then
+        return ACO:Translate(key)
+    end
+
+    return tostring(reason)
+end
 
 -- Incremental bag tracking (robust new-item detection + targeted scans)
 ACO.dirtyBags = {}
@@ -433,11 +535,15 @@ function ACO:ProcessQueueTick()
         return
     end
 
-    if InCombatLockdown() then
+    local now = GetTime()
+
+    local blocked, blockReason = self:IsOpeningBlocked()
+    if blocked then
+        -- Prevent accidental selling/moving items while certain frames are open.
+        -- Keep entries in queue; we will resume automatically once unblocked.
+        self.queueNextAllowedAt = now + 0.5
         return
     end
-
-    local now = GetTime()
     if now < (self.queueNextAllowedAt or 0) then
         return
     end
@@ -503,12 +609,16 @@ function ACO:QueueItem(itemID, itemLink, bag, slot, count)
     local executeAt = GetTime() + delay
 
     if self.db.showNotifications then
+        local blocked, reason = self:IsOpeningBlocked()
+        local reasonText = blocked and self:GetBlockReasonText(reason) or nil
+
         local link = itemLink or self:FormatItemLink(itemID)
-        -- If we enqueue multiple, avoid spamming the same message xN
-        if count == 1 then
-            self:Print(ACO:Translate("OPENING_IN_SECONDS", link, delay))
+        local display = (count == 1) and link or (link .. " x" .. count)
+
+        if blocked then
+            self:Print(ACO:Translate("OPENING_IN_SECONDS_BLOCKED", display, delay, reasonText))
         else
-            self:Print(ACO:Translate("OPENING_IN_SECONDS", link .. " x" .. count, delay))
+            self:Print(ACO:Translate("OPENING_IN_SECONDS", display, delay))
         end
     end
 
@@ -522,9 +632,11 @@ end
 -- ============================================================================
 
 function ACO:OpenAllContainers()
-    if InCombatLockdown() then
-        self:Print(ACO:Translate("CANNOT_OPEN_IN_COMBAT"), true)
-        return 0
+    if not self.db then return 0 end
+
+    local blocked, reason = self:IsOpeningBlocked()
+    if blocked and self.db and self.db.showNotifications then
+        self:Print(ACO:Translate("OPEN_ALL_DEFERRED", self:GetBlockReasonText(reason)))
     end
     
     local opened = 0
@@ -1042,6 +1154,66 @@ events["PLAYER_REGEN_ENABLED"] = function(self)
 end
 
 -- ============================================================================
+-- BLOCKERS (combat/merchant/bank/mail/auction/trade)
+-- These events let us pause opening so we never accidentally SELL / MAIL / BANK items.
+-- ============================================================================
+
+events["PLAYER_REGEN_DISABLED"] = function(self)
+    -- Nothing to do: IsOpeningBlocked() already checks InCombatLockdown().
+    -- We keep this for completeness / potential future UI feedback.
+end
+
+events["MERCHANT_SHOW"] = function(self)
+    ACO:SetBlocker("merchant", true)
+end
+events["MERCHANT_CLOSED"] = function(self)
+    ACO:SetBlocker("merchant", false)
+end
+
+events["TRADE_SHOW"] = function(self)
+    ACO:SetBlocker("trade", true)
+end
+events["TRADE_CLOSED"] = function(self)
+    ACO:SetBlocker("trade", false)
+end
+
+events["AUCTION_HOUSE_SHOW"] = function(self)
+    ACO:SetBlocker("auction", true)
+end
+events["AUCTION_HOUSE_CLOSED"] = function(self)
+    ACO:SetBlocker("auction", false)
+end
+
+events["BANKFRAME_OPENED"] = function(self)
+    ACO:SetBlocker("bank", true)
+end
+events["BANKFRAME_CLOSED"] = function(self)
+    ACO:SetBlocker("bank", false)
+end
+
+events["GUILDBANKFRAME_OPENED"] = function(self)
+    ACO:SetBlocker("guildbank", true)
+end
+events["GUILDBANKFRAME_CLOSED"] = function(self)
+    ACO:SetBlocker("guildbank", false)
+end
+
+events["MAIL_SHOW"] = function(self)
+    ACO:SetBlocker("mail", true)
+end
+events["MAIL_CLOSED"] = function(self)
+    ACO:SetBlocker("mail", false)
+end
+
+-- Void Storage (may not exist on all Retail builds; registered safely)
+events["VOID_STORAGE_OPEN"] = function(self)
+    ACO:SetBlocker("voidstorage", true)
+end
+events["VOID_STORAGE_CLOSE"] = function(self)
+    ACO:SetBlocker("voidstorage", false)
+end
+
+-- ============================================================================
 -- BAG SCANNING (robust new-item detection, stack support, targeted scans)
 -- ============================================================================
 
@@ -1176,7 +1348,12 @@ EventFrame:SetScript("OnEvent", function(self, event, ...)
 end)
 
 for event in pairs(events) do
-    EventFrame:RegisterEvent(event)
+    -- Some events can disappear/rename between expansions or be disabled on certain game modes.
+    -- Register safely to avoid hard errors ("Attempt to register unknown event ...").
+    local ok = pcall(EventFrame.RegisterEvent, EventFrame, event)
+    if (not ok) and ACO and ACO.db and ACO.db.debugMode then
+        ACO:Debug("Skipping unknown event:", tostring(event))
+    end
 end
 
 -- ============================================================================

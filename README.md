@@ -1,6 +1,6 @@
 # Auto Chest Opener
 
-![Version](https://img.shields.io/badge/version-1.2.0-blue)
+![Version](https://img.shields.io/badge/version-1.3.3-blue)
 ![WoW Version](https://img.shields.io/badge/WoW-12.0.0-orange)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
@@ -149,3 +149,7 @@ Créé par **Zayu**
 ---
 
 *Enjoy your automatic chest opening! 🎁*
+
+
+### 1.3.3
+- L'ouverture est automatiquement mise en attente si vous êtes en combat ou si une fenêtre sensible est ouverte (marchand/banque/courrier/HV/échange). Elle reprend automatiquement dès que c'est possible.

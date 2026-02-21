@@ -1,7 +1,7 @@
 --[[
     Auto Chest Opener - UI Module
     Modern and elegant interface inspired by WoW's new UI style
-    Version: 1.3.0
+    Version: 1.3.3
 ]]
 
 local addonName, ACO = ...
@@ -852,7 +852,7 @@ function ACO:InitUI()
     ListIcon:SetAtlas("VignetteLootChest")
     
     local ListTitle = ListSection:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    ListTitle:SetPoint("LEFT", ListIcon, "RIGHT", 6, 0)
+    ListTitle:SetPoint("LEFT", ListIcon, "RIGHT", -15, 0)
     ListTitle:SetText(ACO:Translate("LIST_TITLE"))
     ListTitle:SetTextColor(c.accent.r, c.accent.g, c.accent.b)
     
