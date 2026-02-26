@@ -89,6 +89,10 @@ function ACO:SetBlocker(name, state)
     if old == state then return end
     self.blockers[name] = state and true or false
 
+    -- Affichage debug systématique pour le blocage 'mail'
+    if name == "mail" then
+        self:Print("[DEBUG] Blocage mail : " .. tostring(self.blockers[name]))
+    end
     if self.db and self.db.debugMode then
         self:Debug(("Blocker '%s' -> %s"):format(tostring(name), tostring(self.blockers[name])))
     end
@@ -122,7 +126,12 @@ function ACO:IsOpeningBlocked()
     end
 
     -- Mail: right-click/use can attach items to mail.
-    if (self.blockers and self.blockers.mail) or (MailFrame and MailFrame.IsShown and MailFrame:IsShown()) then
+    -- Ajout compatibilité TSM : vérifie aussi TSM_MailingFrame
+    local tsmMailOpen = false
+    if TSM_MailingFrame and TSM_MailingFrame.IsShown and TSM_MailingFrame:IsShown() then
+        tsmMailOpen = true
+    end
+    if (self.blockers and self.blockers.mail) or (MailFrame and MailFrame.IsShown and MailFrame:IsShown()) or tsmMailOpen then
         return true, "MAIL"
     end
 

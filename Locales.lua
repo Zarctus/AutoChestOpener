@@ -7,7 +7,8 @@ local L = {}
 L["enUS"] = {
     ADDON_LOADED = "Auto Chest Opener loaded! Type |cff00ccff/aco|r to open options.",
     CANNOT_OPEN_IN_COMBAT = "Cannot open while in combat!",
-    NO_CONTAINERS_FOUND = "No tracked containers found in inventory.",
+    SECURE_CLICK_COMBAT = "Can't use secure open in combat.",
+        NO_CONTAINERS_FOUND = "No tracked containers found in inventory.",
     ITEM_ALREADY_LISTED = "This item is already in the list.",
     ADDED = "Added: %s",
     REMOVED = "Removed: %s",
@@ -28,6 +29,7 @@ L["enUS"] = {
     OPEN_ALL_DEFERRED = "Opening queued (waiting for %s).",
 
     BLOCK_REASON_COMBAT = "combat",
+    BLOCK_REASON_CURSOR = "cursor",
     BLOCK_REASON_MERCHANT = "merchant",
     BLOCK_REASON_TRADE = "trade",
     BLOCK_REASON_AUCTION = "auction house",
@@ -43,6 +45,7 @@ L["enUS"] = {
     TAB_CONTAINERS = "Containers",
     TAB_STATS = "Statistics",
     TAB_HISTORY = "History",
+    TAB_PENDING = "Pending" ,
     OPTIONS_TITLE = "Options",
     ENABLE_AUTO_OPEN = "Enable automatic opening",
     ENABLE_TOOLTIP = "Enable or disable the addon",
@@ -113,12 +116,16 @@ L["enUS"] = {
     DELAY_SET = "Delay set to %d seconds",
     DELAY_INVALID = "Delay must be between 0 and 30 seconds",
     DEBUG_MODE = "Debug mode: %s",
+    PENDING_TITLE = "Pending containers",
+    PENDING_HINT = "Click an item to try opening it. If Blizzard requires a secure click, a button will appear.",
+    CANNOT_OPEN_AUTO = "Cannot open automatically:",
 }
 
 L["frFR"] = {
     ADDON_LOADED = "Addon chargé! Tapez |cff00ccff/aco|r pour ouvrir les options.",
     CANNOT_OPEN_IN_COMBAT = "Impossible d'ouvrir en combat!",
-    NO_CONTAINERS_FOUND = "Aucun conteneur référencé trouvé dans l'inventaire.",
+    SECURE_CLICK_COMBAT = "Impossible d'utiliser l'ouverture sécurisée en combat.",
+        NO_CONTAINERS_FOUND = "Aucun conteneur référencé trouvé dans l'inventaire.",
     ITEM_ALREADY_LISTED = "Cet item est déjà dans la liste.",
     ADDED = "Ajouté: %s",
     REMOVED = "Retiré: %s",
@@ -139,6 +146,7 @@ L["frFR"] = {
     OPEN_ALL_DEFERRED = "Ouverture mise en attente (en attente : %s).",
 
     BLOCK_REASON_COMBAT = "combat",
+    BLOCK_REASON_CURSOR = "curseur",
     BLOCK_REASON_MERCHANT = "marchand",
     BLOCK_REASON_TRADE = "échange",
     BLOCK_REASON_AUCTION = "hôtel des ventes",
@@ -154,6 +162,7 @@ L["frFR"] = {
     TAB_CONTAINERS = "Conteneurs",
     TAB_STATS = "Statistiques",
     TAB_HISTORY = "Historique",
+    TAB_PENDING = "En attente" ,
     OPTIONS_TITLE = "Paramètres",
     ENABLE_AUTO_OPEN = "Activer l'ouverture automatique",
     ENABLE_TOOLTIP = "Active ou désactive l'addon",
@@ -223,6 +232,9 @@ L["frFR"] = {
     DELAY_SET = "Délai réglé à %d secondes",
     DELAY_INVALID = "Le délai doit être entre 0 et 30 secondes",
     DEBUG_MODE = "Mode debug: %s",
+    PENDING_TITLE = "Conteneurs en attente",
+    PENDING_HINT = "Clique un item pour tenter de l'ouvrir. Si Blizzard exige un clic sécurisé, un bouton apparaîtra.",
+    CANNOT_OPEN_AUTO = "Impossible d\'ouvrir automatiquement : ",
 }
 
 -- Fallback to enUS for missing keys

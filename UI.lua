@@ -1,7 +1,7 @@
 --[[
     Auto Chest Opener - UI Module
     Modern and elegant interface inspired by WoW's new UI style
-    Version: 1.3.3
+    Version: 1.3.5
 ]]
 
 local addonName, ACO = ...
@@ -38,7 +38,7 @@ local UI = ACO.UI
 -- UI CONSTANTS
 -- ============================================================================
 
-local FRAME_WIDTH = 500
+local FRAME_WIDTH = 560
 local FRAME_HEIGHT = 600
 local FRAME_MIN_WIDTH = 420
 local FRAME_MIN_HEIGHT = 500
@@ -165,7 +165,7 @@ local function CreateModernButton(parent, text, width, height, isPrimary)
         fontString:SetTextColor(1, 1, 1)
         PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
     end)
-    
+
     button:SetScript("OnLeave", function(self)
         self:SetBackdropColor(bgR, bgG, bgB, 0.9)
         self:SetBackdropBorderColor(borderR, borderG, borderB, 0.8)
@@ -373,6 +373,7 @@ local function CreateModernSlider(parent, label, minVal, maxVal, step, tooltip)
             end
         end)
     end)
+
     
     -- Méthode pour définir la valeur (avec gestion du timing)
     frame.SetValue = function(self, val)
@@ -529,6 +530,11 @@ function ACO:InitUI()
     HistoryContent:SetPoint("BOTTOMRIGHT", MainFrame, "BOTTOMRIGHT", 0, 0)
     HistoryContent:Hide()
     
+    local PendingContent = CreateFrame("Frame", nil, MainFrame)
+    PendingContent:SetPoint("TOPLEFT", TabContainer, "BOTTOMLEFT", 0, 0)
+    PendingContent:SetPoint("BOTTOMRIGHT", MainFrame, "BOTTOMRIGHT", 0, 0)
+    PendingContent:Hide()
+
     UI.tabs = {}
     UI.currentTab = "containers"
     
@@ -589,6 +595,7 @@ function ACO:InitUI()
     local containersTab = CreateTab(TabContainer, ACO:Translate("TAB_CONTAINERS"), "VignetteLootChest", "containers", PADDING)
     local statsTab = CreateTab(TabContainer, ACO:Translate("TAB_STATS"), "poi-workorders", "stats", PADDING + 134)
     local historyTab = CreateTab(TabContainer, ACO:Translate("TAB_HISTORY"), "communities-icon-clock", "history", PADDING + 268)
+    local pendingTab = CreateTab(TabContainer, ACO:Translate("TAB_PENDING"), "QuestNormal", "pending", PADDING + 402)
     
     function UI:SwitchTab(tabKey)
         self.currentTab = tabKey
@@ -597,6 +604,7 @@ function ACO:InitUI()
         ContainersContent:Hide()
         StatsContent:Hide()
         HistoryContent:Hide()
+        PendingContent:Hide()
         
         -- Deactivate all tabs
         for _, tab in pairs(self.tabs) do
@@ -618,6 +626,9 @@ function ACO:InitUI()
         elseif tabKey == "history" then
             HistoryContent:Show()
             self:RefreshHistory()
+        elseif tabKey == "pending" then
+            PendingContent:Show()
+            self:RefreshPendingList()
         end
     end
     
@@ -1107,7 +1118,137 @@ function ACO:InitUI()
         self.listCount:SetText(ACO:Translate("LIST_COUNT", count, suffix))
     end
     
-    -- ========================================================================
+    
+-- ========================================================================
+-- PENDING TAB CONTENT
+-- ========================================================================
+local PendingSection = CreateFrame("Frame", nil, PendingContent, "BackdropTemplate")
+PendingSection:SetPoint("TOPLEFT", PADDING, -PADDING)
+PendingSection:SetPoint("TOPRIGHT", -PADDING, -PADDING)
+PendingSection:SetPoint("BOTTOMLEFT", PADDING, PADDING)
+PendingSection:SetBackdrop(CardBackdrop)
+PendingSection:SetBackdropColor(c.backgroundLight.r, c.backgroundLight.g, c.backgroundLight.b, 0.6)
+PendingSection:SetBackdropBorderColor(c.primary.r * 0.3, c.primary.g * 0.3, c.primary.b * 0.3, 0.4)
+
+local PendingTitle = PendingSection:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+PendingTitle:SetPoint("TOPLEFT", PADDING, -PADDING)
+PendingTitle:SetText(ACO:Translate("PENDING_TITLE"))
+PendingTitle:SetTextColor(c.text.r, c.text.g, c.text.b)
+
+local PendingHint = PendingSection:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+PendingHint:SetPoint("TOPLEFT", PendingTitle, "BOTTOMLEFT", 0, -4)
+PendingHint:SetText(ACO:Translate("PENDING_HINT"))
+PendingHint:SetTextColor(c.textDim.r, c.textDim.g, c.textDim.b)
+
+local PendingScroll = CreateFrame("ScrollFrame", nil, PendingSection, "UIPanelScrollFrameTemplate")
+PendingScroll:SetPoint("TOPLEFT", PADDING, -55)
+PendingScroll:SetPoint("BOTTOMRIGHT", -PADDING - 20, PADDING)
+
+local PendingScrollChild = CreateFrame("Frame", nil, PendingScroll)
+PendingScrollChild:SetSize(PendingScroll:GetWidth(), 1)
+PendingScroll:SetScrollChild(PendingScrollChild)
+
+UI.pendingListItems = {}
+
+local function CreatePendingItem(entry, index)
+    local c = ACO.colors
+    -- Use a SecureActionButton so items that require a secure click can still be opened
+    local item = CreateFrame("Button", nil, PendingScrollChild, "BackdropTemplate")
+    -- Ensure the button actually receives clicks (some UI contexts won't register by default)
+    item:EnableMouse(true)
+    if item.RegisterForClicks then
+        item:RegisterForClicks("RightButtonUp")
+    end
+    item:SetSize(PendingScroll:GetWidth() - 10, LIST_ITEM_HEIGHT)
+    item:SetPoint("TOPLEFT", 0, -(index - 1) * (LIST_ITEM_HEIGHT + 4))
+    item:SetBackdrop(CardBackdrop)
+    item:SetBackdropColor(0.08, 0.08, 0.12, 0.8)
+    item:SetBackdropBorderColor(c.primary.r * 0.3, c.primary.g * 0.3, c.primary.b * 0.3, 0.5)
+
+    local icon = item:CreateTexture(nil, "ARTWORK")
+    icon:SetSize(28, 28)
+    icon:SetPoint("LEFT", 8, 0)
+
+    local name = item:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    name:SetPoint("LEFT", icon, "RIGHT", 10, 0)
+    name:SetWidth(320)
+    name:SetJustifyH("LEFT")
+    name:SetTextColor(c.text.r, c.text.g, c.text.b)
+
+    local countText = item:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    countText:SetPoint("RIGHT", -10, 0)
+    countText:SetTextColor(c.textDim.r, c.textDim.g, c.textDim.b)
+
+    -- Fill
+    local link = entry.link or ACO:FormatItemLink(entry.itemID)
+    item._acoLink = link
+    local itemName = link:match("%[(.-)%]") or ("Item:" .. tostring(entry.itemID))
+    name:SetText(itemName)
+    countText:SetText("x" .. tostring(entry.count or 1))
+
+    -- Icon
+    local texture = C_Item.GetItemIconByID and C_Item.GetItemIconByID(entry.itemID)
+    if texture then icon:SetTexture(texture) end
+
+
+    -- Click: try to open immediately (hardware event), then refresh.
+    item:SetScript("OnClick", function(self, button)
+        -- This item opens with a right-click in the bag; mimic that here.
+        if button ~= "RightButton" then
+            return
+        end
+        local ok, reason = ACO:UseBagSlotViaMacro(entry.bag, entry.slot)
+        if not ok then
+            local link2 = entry.link or ACO:FormatItemLink(entry.itemID)
+            ACO:Print(ACO:Translate("CANNOT_OPEN_AUTO") .. " " .. tostring(link2) .. (reason and (" ("..tostring(reason)..")") or ""))
+        end
+        C_Timer.After(0.15, function()
+            if UI and UI.RefreshPendingList then
+                UI:RefreshPendingList()
+            end
+        end)
+    end)
+
+
+    item:SetScript("OnEnter", function(self)
+        self:SetBackdropBorderColor(c.primary.r, c.primary.g, c.primary.b, 0.9)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:SetHyperlink(self._acoLink)
+        GameTooltip:Show()
+    end)
+    item:SetScript("OnLeave", function(self)
+        self:SetBackdropBorderColor(c.primary.r * 0.3, c.primary.g * 0.3, c.primary.b * 0.3, 0.5)
+        GameTooltip:Hide()
+    end)
+
+    return item
+end
+
+function UI:RefreshPendingList()
+    if not PendingContent or not PendingContent:IsShown() then return end
+    -- Clear existing
+    if self.pendingListItems then
+        for _, item in ipairs(self.pendingListItems) do
+            item:Hide()
+            item:SetParent(nil)
+        end
+        wipe(self.pendingListItems)
+    else
+        self.pendingListItems = {}
+    end
+
+    local pending = ACO:GetPendingContainersInBags()
+    local index = 1
+    for _, e in ipairs(pending) do
+        local listItem = CreatePendingItem(e, index)
+        table.insert(self.pendingListItems, listItem)
+        index = index + 1
+    end
+
+    PendingScrollChild:SetHeight(max(1, (index - 1) * (LIST_ITEM_HEIGHT + 4)))
+end
+
+-- ========================================================================
     -- STATISTICS TAB CONTENT
     -- ========================================================================
     
@@ -1612,6 +1753,8 @@ function ACO:InitUI()
     end
 
     UI.minimapButton = MinimapButton
+
+
 end
 
 -- Register to add containers via item links in chat
