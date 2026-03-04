@@ -521,6 +521,19 @@ function ACO:StartQueueWorker()
     self.queueTicker = C_Timer.NewTicker(0.1, function()
         selfRef:ProcessQueueTick()
     end)
+
+    function ACO:UseBagSlotViaMacro(bag, slot)
+        if not bag or not slot then
+            return false, "MISSING"
+        end
+
+        local info = C_Container.GetContainerItemInfo(bag, slot)
+        if not info or not info.itemID then
+            return false, "MISSING"
+        end
+
+        return self:UseContainerFromBagSlot(info.itemID, bag, slot, info.hyperlink)
+    end
 end
 
 function ACO:StopQueueWorker()
@@ -718,6 +731,43 @@ function ACO:OpenAllContainers()
     end
 
     return #toOpen
+end
+
+-- ============================================================================
+-- PENDING CONTAINERS QUERY (used by UI)
+-- ============================================================================
+
+function ACO:GetPendingContainersInBags()
+    local result = {}
+    if not self.db then return result end
+
+    local containers = self.db.containers
+    local seen = {}
+
+    for _, bag in ipairs(self:GetTrackedBags()) do
+        local numSlots = C_Container.GetContainerNumSlots(bag) or 0
+        for slot = 1, numSlots do
+            local info = C_Container.GetContainerItemInfo(bag, slot)
+            if info and info.itemID and containers[info.itemID] then
+                local id = info.itemID
+                if seen[id] then
+                    seen[id].count = seen[id].count + (info.stackCount or 1)
+                else
+                    local entry = {
+                        itemID = id,
+                        link = info.hyperlink,
+                        bag = bag,
+                        slot = slot,
+                        count = info.stackCount or 1,
+                    }
+                    seen[id] = entry
+                    tinsert(result, entry)
+                end
+            end
+        end
+    end
+
+    return result
 end
 
 -- ============================================================================

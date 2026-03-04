@@ -1197,7 +1197,7 @@ local function CreatePendingItem(entry, index)
         if button ~= "RightButton" then
             return
         end
-        local ok, reason = ACO:UseBagSlotViaMacro(entry.bag, entry.slot)
+        local ok, reason = ACO:UseContainerFromBagSlot(entry.itemID, entry.bag, entry.slot, entry.link)
         if not ok then
             local link2 = entry.link or ACO:FormatItemLink(entry.itemID)
             ACO:Print(ACO:Translate("CANNOT_OPEN_AUTO") .. " " .. tostring(link2) .. (reason and (" ("..tostring(reason)..")") or ""))
