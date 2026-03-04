@@ -1,7 +1,7 @@
 --[[
     Auto Chest Opener - Core Module
     Automatically opens chests, bags and containers after receiving them
-    Version: 1.3.5
+    Version: 2.0.0
 ]]
 
 local addonName, ACO = ...
@@ -19,7 +19,6 @@ local time, date = time, date
 
 -- WoW API globals that are frequently called
 local GetTime = GetTime
-local GetItemInfoInstant = GetItemInfoInstant
 
 -- WoW API upvalues
 local C_Container = C_Container
@@ -42,13 +41,13 @@ local Item = Item
 
 ACO.name = addonName
 -- Try to read version from the AddOn TOC metadata (## Version:)
-local tocVersion = (GetAddOnMetadata and GetAddOnMetadata(addonName, "Version")) or nil
+local tocVersion = (C_AddOns and C_AddOns.GetAddOnMetadata and C_AddOns.GetAddOnMetadata(addonName, "Version")) or nil
 -- If packaged with a tool, the TOC can contain a placeholder like "@project-version@".
 -- Treat it as invalid and fallback to the hardcoded version.
 if tocVersion == "@project-version@" then
     tocVersion = nil
 end
-ACO.version = (tocVersion and tocVersion ~= "" ) and tocVersion or "1.3.5"
+ACO.version = (tocVersion and tocVersion ~= "" ) and tocVersion or "2.0.0"
 ACO.pendingItems = {}
 ACO.itemQueue = {}
 ACO.goldTracker = {
@@ -80,6 +79,8 @@ ACO.blockers = {
     mail = false,
     guildbank = false,
     voidstorage = false,
+    loot = false,
+    scrapping = false,
 }
 
 function ACO:SetBlocker(name, state)
@@ -89,10 +90,6 @@ function ACO:SetBlocker(name, state)
     if old == state then return end
     self.blockers[name] = state and true or false
 
-    -- Affichage debug systématique pour le blocage 'mail'
-    if name == "mail" then
-        self:Print("[DEBUG] Blocage mail : " .. tostring(self.blockers[name]))
-    end
     if self.db and self.db.debugMode then
         self:Debug(("Blocker '%s' -> %s"):format(tostring(name), tostring(self.blockers[name])))
     end
@@ -110,42 +107,60 @@ function ACO:IsOpeningBlocked()
         return true, "COMBAT"
     end
 
-    -- Merchant: right-click/use can SELL items when the merchant frame is open.
-    if (self.blockers and self.blockers.merchant) or (MerchantFrame and MerchantFrame.IsShown and MerchantFrame:IsShown()) then
+    -- Cursor: if player has an item on cursor, using containers could interact
+    if GetCursorInfo and GetCursorInfo() then
+        return true, "CURSOR"
+    end
+
+    local b = self.blockers or {}
+
+    -- Merchant: right-click/use can SELL items
+    if b.merchant or (MerchantFrame and MerchantFrame:IsShown()) then
         return true, "MERCHANT"
     end
 
-    -- Trade: right-click/use can MOVE items into trade window.
-    if (self.blockers and self.blockers.trade) or (TradeFrame and TradeFrame.IsShown and TradeFrame:IsShown()) then
+    -- Trade: right-click/use can MOVE items into trade window
+    if b.trade or (TradeFrame and TradeFrame:IsShown()) then
         return true, "TRADE"
     end
 
-    -- Auction House: right-click/use can list/drag items or behave unexpectedly.
-    if (self.blockers and self.blockers.auction) or (AuctionHouseFrame and AuctionHouseFrame.IsShown and AuctionHouseFrame:IsShown()) then
+    -- Auction House
+    if b.auction or (AuctionHouseFrame and AuctionHouseFrame:IsShown()) then
         return true, "AUCTION"
     end
 
-    -- Mail: right-click/use can attach items to mail.
-    -- Ajout compatibilité TSM : vérifie aussi TSM_MailingFrame
-    local tsmMailOpen = false
-    if TSM_MailingFrame and TSM_MailingFrame.IsShown and TSM_MailingFrame:IsShown() then
-        tsmMailOpen = true
-    end
-    if (self.blockers and self.blockers.mail) or (MailFrame and MailFrame.IsShown and MailFrame:IsShown()) or tsmMailOpen then
+    -- Mail (+ TSM compatibility via rawget)
+    local tsmMail = rawget(_G, "TSM_MailingFrame")
+    if b.mail or (MailFrame and MailFrame:IsShown()) or (tsmMail and tsmMail.IsShown and tsmMail:IsShown()) then
         return true, "MAIL"
     end
 
-    -- Bank / Guild Bank: right-click/use can deposit items instead of opening.
-    if (self.blockers and self.blockers.bank) or (BankFrame and BankFrame.IsShown and BankFrame:IsShown()) then
+    -- Bank
+    if b.bank or (BankFrame and BankFrame:IsShown()) then
         return true, "BANK"
     end
-    if (self.blockers and self.blockers.guildbank) or (GuildBankFrame and GuildBankFrame.IsShown and GuildBankFrame:IsShown()) then
+
+    -- Guild Bank (may not exist on all builds)
+    local gbFrame = rawget(_G, "GuildBankFrame")
+    if b.guildbank or (gbFrame and gbFrame.IsShown and gbFrame:IsShown()) then
         return true, "GUILDBANK"
     end
 
-    -- Void storage (rare but safe to guard)
-    if (self.blockers and self.blockers.voidstorage) or (VoidStorageFrame and VoidStorageFrame.IsShown and VoidStorageFrame:IsShown()) then
+    -- Void Storage
+    local vsFrame = rawget(_G, "VoidStorageFrame")
+    if b.voidstorage or (vsFrame and vsFrame.IsShown and vsFrame:IsShown()) then
         return true, "VOIDSTORAGE"
+    end
+
+    -- Loot window
+    if b.loot or (LootFrame and LootFrame:IsShown()) then
+        return true, "LOOT"
+    end
+
+    -- Scrapping machine
+    local scrappingFrame = rawget(_G, "ScrappingMachineFrame")
+    if b.scrapping or (scrappingFrame and scrappingFrame.IsShown and scrappingFrame:IsShown()) then
+        return true, "SCRAPPING"
     end
 
     return false, nil
@@ -159,6 +174,7 @@ function ACO:GetBlockReasonText(reason)
 
     local map = {
         COMBAT = "BLOCK_REASON_COMBAT",
+        CURSOR = "BLOCK_REASON_CURSOR",
         MERCHANT = "BLOCK_REASON_MERCHANT",
         TRADE = "BLOCK_REASON_TRADE",
         AUCTION = "BLOCK_REASON_AUCTION",
@@ -166,6 +182,8 @@ function ACO:GetBlockReasonText(reason)
         BANK = "BLOCK_REASON_BANK",
         GUILDBANK = "BLOCK_REASON_GUILDBANK",
         VOIDSTORAGE = "BLOCK_REASON_VOIDSTORAGE",
+        LOOT = "BLOCK_REASON_LOOT",
+        SCRAPPING = "BLOCK_REASON_SCRAPPING",
     }
 
     local key = map[reason]
@@ -298,15 +316,11 @@ end
 -- On évite alors de "cacher = false" trop tôt, sinon certains conteneurs ne seront jamais reconnus.
 function ACO:IsItemDataAvailable(itemID)
     if not itemID then return false end
-    if C_Item and C_Item.IsItemDataCachedByID then
+    if C_Item.IsItemDataCachedByID then
         return C_Item.IsItemDataCachedByID(itemID)
     end
-    if C_Item and C_Item.GetItemNameByID then
+    if C_Item.GetItemNameByID then
         local name = C_Item.GetItemNameByID(itemID)
-        if name then return true end
-    end
-    if GetItemInfo then
-        local name = GetItemInfo(itemID)
         if name then return true end
     end
     return false
@@ -330,6 +344,9 @@ local OPEN_KEYWORDS = {
     "loot", "piller",                   -- loot keywords
     "salvage", "récupér",               -- salvage crates
     "click", "cliqu",                   -- click to open
+    "reveal", "unpack",                 -- reveal/unpack containers
+    "crack",                            -- crack open
+    "contain",                          -- "contains" in spell text
 }
 
 local CONTAINER_NAME_KEYWORDS = {
@@ -340,50 +357,65 @@ local CONTAINER_NAME_KEYWORDS = {
     "treasure", "trésor", "salvage", "récupération",
     "parcel", "colis", "package", "paquet",
     "pouch", "bourse", "purse",
+    "coffer", "lockbox", "strongbox",    -- PvP/Delves containers
+    "hoard", "trove", "stash",           -- treasure hoards
+    "supply", "provisions",              -- supply crates
+    "reward", "récompense",              -- reward containers
+    "gift", "cadeau", "present",         -- holiday items
+    "mystery", "bounty", "casket",       -- various containers
+    "capsule", "war chest",              -- special containers
 }
 
 
 function ACO:IsContainerItem(itemID)
     if not itemID then return false end
 
-    -- Check user-defined containers (priorité absolue)
+    -- Check user-defined containers (absolute priority)
     if self.db and self.db.containers[itemID] then
         return true
     end
 
-    -- Cache (évite des checks coûteux pendant les scans)
+    -- Cache (avoid costly checks during bag scans)
     if self.containerCache[itemID] ~= nil then
         return self.containerCache[itemID]
     end
 
-    -- Exclure les items équipables (sacs/armures/armes) pour éviter les faux positifs
-    local equipLoc
-    if GetItemInfoInstant then
-        equipLoc = select(9, GetItemInfoInstant(itemID))
+    -- Get class/subclass/equipLoc via instant API (no cache required)
+    local equipLoc, classID, subClassID
+    if C_Item.GetItemInfoInstant then
+        local _, _, _, eqLoc, _, cID, scID = C_Item.GetItemInfoInstant(itemID)
+        equipLoc = eqLoc
+        classID = cID
+        subClassID = scID
     end
-    if not equipLoc then
-        equipLoc = select(9, GetItemInfo(itemID))
-    end
-    if equipLoc and equipLoc ~= "" then
+
+    -- Exclude equippable items (armor, weapons, real bags)
+    if equipLoc and equipLoc ~= "" and equipLoc ~= "INVTYPE_NON_EQUIP" then
         self.containerCache[itemID] = false
         return false
     end
 
-    -- IMPORTANT: si l'item n'est pas encore en cache, certains appels (nom/spell) retournent nil.
-    -- Dans ce cas, on NE "cache" PAS false, sinon l'item ne sera jamais reconnu.
+    -- Class 1 = Container (equippable bags), Class 11 = Quiver -> never auto-open
+    if classID == 1 or classID == 11 then
+        self.containerCache[itemID] = false
+        return false
+    end
+
+    -- If item data not yet cached, don't cache false (will retry later)
     if not self:IsItemDataAvailable(itemID) then
         return false
     end
 
-    local itemSpell = (C_Item and C_Item.GetItemSpell) and C_Item.GetItemSpell(itemID) or nil
-    local itemName = (C_Item and C_Item.GetItemNameByID) and C_Item.GetItemNameByID(itemID) or nil
+    local itemSpell = C_Item.GetItemSpell and C_Item.GetItemSpell(itemID) or nil
+    local itemName = C_Item.GetItemNameByID and C_Item.GetItemNameByID(itemID) or nil
 
-    self:Debug(format("Checking item %d: name='%s', spell='%s'",
-        itemID, itemName or "nil", itemSpell or "nil"))
+    self:Debug(format("Checking item %d: name='%s', spell='%s', class=%s/%s",
+        itemID, itemName or "nil", itemSpell or "nil",
+        tostring(classID), tostring(subClassID)))
 
     local isContainer = false
 
-    -- 1) Priorité au spell "Use:" (le plus fiable quand dispo)
+    -- 1) Priority: "Use:" spell text (most reliable when available)
     if itemSpell and itemSpell ~= "" then
         local spellLower = NormalizeText(itemSpell)
         if spellLower and (ContainsAnyPlain(spellLower, OPEN_PATTERNS) or ContainsAnyPlain(spellLower, OPEN_KEYWORDS)) then
@@ -391,12 +423,18 @@ function ACO:IsContainerItem(itemID)
         end
     end
 
-    -- 2) Fallback sur le nom de l'item (moins fiable, mais utile)
+    -- 2) Fallback: item name keywords
     if not isContainer and itemName and itemName ~= "" then
         local nameLower = NormalizeText(itemName)
         if nameLower and ContainsAnyPlain(nameLower, CONTAINER_NAME_KEYWORDS) then
             isContainer = true
         end
+    end
+
+    -- 3) Class-based heuristic: Miscellaneous (15) items with any Use: spell
+    --    are very likely openable containers
+    if not isContainer and classID == 15 and itemSpell and itemSpell ~= "" then
+        isContainer = true
     end
 
     self.containerCache[itemID] = isContainer
@@ -521,19 +559,6 @@ function ACO:StartQueueWorker()
     self.queueTicker = C_Timer.NewTicker(0.1, function()
         selfRef:ProcessQueueTick()
     end)
-
-    function ACO:UseBagSlotViaMacro(bag, slot)
-        if not bag or not slot then
-            return false, "MISSING"
-        end
-
-        local info = C_Container.GetContainerItemInfo(bag, slot)
-        if not info or not info.itemID then
-            return false, "MISSING"
-        end
-
-        return self:UseContainerFromBagSlot(info.itemID, bag, slot, info.hyperlink)
-    end
 end
 
 function ACO:StopQueueWorker()
@@ -954,10 +979,10 @@ function ACO:StartGoldTracking(itemID)
     self.goldTracker.pendingItemID = itemID
     self.goldTracker.startTime = time()
     
-    -- Check for gold change after a short delay (loot processing time)
-    C_Timer.After(0.5, function()
-        self:CheckGoldGained()
-    end)
+    -- Check for gold change at multiple intervals (server lag resilience)
+    local selfRef = self
+    C_Timer.After(0.5, function() selfRef:CheckGoldGained() end)
+    C_Timer.After(1.5, function() selfRef:CheckGoldGained() end)
 end
 
 -- Check if gold was gained from container
@@ -1309,6 +1334,22 @@ events["VOID_STORAGE_CLOSE"] = function(self)
     ACO:SetBlocker("voidstorage", false)
 end
 
+-- Loot window (opening containers while looting can cause issues)
+events["LOOT_OPENED"] = function(self)
+    ACO:SetBlocker("loot", true)
+end
+events["LOOT_CLOSED"] = function(self)
+    ACO:SetBlocker("loot", false)
+end
+
+-- Scrapping machine
+events["SCRAPPING_MACHINE_SHOW"] = function(self)
+    ACO:SetBlocker("scrapping", true)
+end
+events["SCRAPPING_MACHINE_CLOSE"] = function(self)
+    ACO:SetBlocker("scrapping", false)
+end
+
 -- ============================================================================
 -- BAG SCANNING (robust new-item detection, stack support, targeted scans)
 -- ============================================================================
@@ -1534,7 +1575,7 @@ for event in pairs(events) do
     -- Register safely to avoid hard errors ("Attempt to register unknown event ...").
     local ok = pcall(EventFrame.RegisterEvent, EventFrame, event)
     if (not ok) and ACO and ACO.db and ACO.db.debugMode then
-        ACO:Debug("Skipping unknown event:", tostring(event))
+        ACO:Debug("Skipping unknown event: " .. tostring(event))
     end
 end
 
@@ -1660,6 +1701,20 @@ SlashCmdList["AUTOCHESTOPENER"] = function(msg)
         if ACO.UI and ACO.UI.Toggle then
             ACO.UI:Toggle()
         end
+    elseif cmd == "export" then
+        ACO:ShowExportFrame()
+    elseif cmd == "import" then
+        if arg and arg ~= "" then
+            ACO:ImportContainers(arg, false)
+        else
+            ACO:ShowImportFrame()
+        end
+    elseif cmd == "clear" then
+        wipe(ACO.db.containers)
+        ACO:Print(ACO:Translate("LIST_CLEARED"))
+        if ACO.UI and ACO.UI.RefreshList then
+            ACO.UI:RefreshList()
+        end
     else
         ACO:Print(ACO:Translate("COMMANDS_AVAILABLE"))
         print("  /aco - Ouvrir l'interface")
@@ -1675,6 +1730,9 @@ SlashCmdList["AUTOCHESTOPENER"] = function(msg)
         print("  /aco clearhistory - Effacer l'historique")
         print("  /aco info <itemID> - Info sur un item")
         print("  /aco scan - Forcer un scan des sacs")
+        print("  /aco import - Importer des conteneurs")
+        print("  /aco export - Exporter les conteneurs")
+        print("  /aco clear - Vider la liste")
         print("  /aco debug - Mode debug")
     end
 end
@@ -1721,31 +1779,6 @@ function ACO:ImportContainers(importString, clearExisting)
     end
     
     return count
-end
-
--- Add import/export slash commands
-local originalSlashHandler = SlashCmdList["AUTOCHESTOPENER"]
-SlashCmdList["AUTOCHESTOPENER"] = function(msg)
-    local cmd, arg = strsplit(" ", msg, 2)
-    cmd = string.lower(cmd or "")
-    
-    if cmd == "export" then
-        ACO:ShowExportFrame()
-    elseif cmd == "import" then
-        if arg and arg ~= "" then
-            ACO:ImportContainers(arg, false)
-        else
-            ACO:ShowImportFrame()
-        end
-    elseif cmd == "clear" then
-        wipe(ACO.db.containers)
-        ACO:Print(ACO:Translate("LIST_CLEARED"))
-        if ACO.UI and ACO.UI.RefreshList then
-            ACO.UI:RefreshList()
-        end
-    else
-        originalSlashHandler(msg)
-    end
 end
 
 function ACO:CreateImportExportFrame()

@@ -1,7 +1,7 @@
 --[[
     Auto Chest Opener - UI Module
     Modern and elegant interface inspired by WoW's new UI style
-    Version: 1.3.5
+    Version: 2.0.0
 ]]
 
 local addonName, ACO = ...
@@ -239,7 +239,7 @@ local function CreateModernCheckbox(parent, label, tooltip)
         self:SetBackdropBorderColor(c.primary.r, c.primary.g, c.primary.b, 1)
         if tooltip then
             GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-            GameTooltip:SetText(tooltip, nil, nil, nil, nil, true)
+        GameTooltip:SetText(tooltip, 1, 1, 1, 1, true)
             GameTooltip:Show()
         end
     end)
@@ -696,7 +696,7 @@ function ACO:InitUI()
             if DelaySlider.SetValue then
                 DelaySlider:SetValue(ACO.db.delay)
             elseif DelaySlider.UpdateSlider then
-                DelaySlider:UpdateSlider(ACO.db.delay)
+                DelaySlider.UpdateSlider(ACO.db.delay)
             end
         end)
     end)
@@ -782,7 +782,7 @@ function ACO:InitUI()
     DropZone:SetScript("OnEnter", function(self)
         self:SetBackdropBorderColor(c.primary.r, c.primary.g, c.primary.b, 1)
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:SetText(ACO:Translate("DROPZONE_TOOLTIP"), nil, nil, nil, nil, true)
+        GameTooltip:SetText(ACO:Translate("DROPZONE_TOOLTIP"), 1, 1, 1, 1, true)
         GameTooltip:Show()
     end)
     
@@ -1454,7 +1454,7 @@ end
         -- Full date on second line
         local dateText = item:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
         dateText:SetPoint("TOPLEFT", 10, -20)
-        dateText:SetText(date("%d/%m/%Y %H:%M", entry.timestamp))
+        dateText:SetText(tostring(date("%d/%m/%Y %H:%M", entry.timestamp)))
         dateText:SetTextColor(c.textDim.r * 0.7, c.textDim.g * 0.7, c.textDim.b * 0.7)
         
         -- Icon
@@ -1662,7 +1662,7 @@ end
     MinimapButton:SetClampedToScreen(true)
     
     -- Position
-    local angle = 220
+    local angle = math.rad(220)
     local radius = 80
     MinimapButton:SetPoint("CENTER", Minimap, "CENTER", 
         radius * cos(angle), radius * sin(angle))
@@ -1711,8 +1711,8 @@ end
             cx, cy = cx / scale, cy / scale
             
             local angle = math.atan2(cy - my, cx - mx)
-            local x = cos(math.deg(angle)) * radius
-            local y = sin(math.deg(angle)) * radius
+            local x = cos(angle) * radius
+            local y = sin(angle) * radius
             
             self:ClearAllPoints()
             self:SetPoint("CENTER", Minimap, "CENTER", x, y)
