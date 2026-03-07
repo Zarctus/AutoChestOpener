@@ -641,7 +641,7 @@ function ACO:InitUI()
     -- ========================================================================
     
     local OptionsSection = CreateFrame("Frame", nil, ContainersContent, "BackdropTemplate")
-    OptionsSection:SetHeight(140)
+    OptionsSection:SetHeight(170)
     OptionsSection:SetPoint("TOPLEFT", PADDING, -PADDING)
     OptionsSection:SetPoint("TOPRIGHT", -PADDING, -PADDING)
     OptionsSection:SetBackdrop(CardBackdrop)
@@ -683,9 +683,17 @@ function ACO:InitUI()
         ACO.db.notificationSound = checked
     end
     
+    -- Auto-discovery checkbox
+    local AutoDiscoverCheck = CreateModernCheckbox(OptionsSection, ACO:Translate("ENABLE_AUTO_DISCOVER"), ACO:Translate("ENABLE_AUTO_DISCOVER_TOOLTIP"))
+    AutoDiscoverCheck:SetPoint("TOPLEFT", NotifyCheck, "BOTTOMLEFT", 0, -8)
+    AutoDiscoverCheck.checkbox:SetChecked(ACO.db.autoDiscovery ~= false)
+    AutoDiscoverCheck.checkbox.callback = function(checked)
+        ACO.db.autoDiscovery = checked
+    end
+    
     -- Delay slider
     local DelaySlider = CreateModernSlider(OptionsSection, ACO:Translate("DELAY_SLIDER_LABEL"), 0, 10, 0.5, ACO:Translate("DELAY_TOOLTIP"))
-    DelaySlider:SetPoint("TOPLEFT", NotifyCheck, "BOTTOMLEFT", 0, -12)
+    DelaySlider:SetPoint("TOPLEFT", AutoDiscoverCheck, "BOTTOMLEFT", 0, -12)
     DelaySlider.callback = function(value)
         ACO.db.delay = value
     end
@@ -1754,6 +1762,249 @@ end
 
     UI.minimapButton = MinimapButton
 
+    -- ========================================================================
+    -- QUEUE WIDGET (Real-time visual queue progress)
+    -- ========================================================================
+
+    local QueueWidget = CreateFrame("Frame", "ACOQueueWidget", UIParent, "BackdropTemplate")
+    QueueWidget:SetSize(320, 85)
+    QueueWidget:SetPoint("BOTTOM", UIParent, "BOTTOM", 0, 200)
+    QueueWidget:SetMovable(true)
+    QueueWidget:EnableMouse(true)
+    QueueWidget:RegisterForDrag("LeftButton")
+    QueueWidget:SetScript("OnDragStart", QueueWidget.StartMoving)
+    QueueWidget:SetScript("OnDragStop", QueueWidget.StopMovingOrSizing)
+    QueueWidget:SetClampedToScreen(true)
+    QueueWidget:SetFrameStrata("HIGH")
+    QueueWidget:SetBackdrop(MainBackdrop)
+    QueueWidget:SetBackdropColor(c.background.r, c.background.g, c.background.b, 0.95)
+    QueueWidget:SetBackdropBorderColor(c.primary.r, c.primary.g, c.primary.b, 0.8)
+    QueueWidget:Hide()
+
+    -- Item icon
+    local qwIcon = QueueWidget:CreateTexture(nil, "ARTWORK")
+    qwIcon:SetSize(36, 36)
+    qwIcon:SetPoint("TOPLEFT", 10, -10)
+    qwIcon:SetTexture("Interface\\Icons\\INV_Misc_QuestionMark")
+
+    -- Item name
+    local qwName = QueueWidget:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    qwName:SetPoint("TOPLEFT", qwIcon, "TOPRIGHT", 8, -2)
+    qwName:SetPoint("RIGHT", QueueWidget, "RIGHT", -68, 0)
+    qwName:SetJustifyH("LEFT")
+    qwName:SetTextColor(c.text.r, c.text.g, c.text.b)
+
+    -- Timer countdown (large, bright, prominent)
+    local qwTimer = QueueWidget:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+    qwTimer:SetPoint("BOTTOMLEFT", qwIcon, "BOTTOMRIGHT", 8, 2)
+    qwTimer:SetTextColor(c.primary.r, c.primary.g, c.primary.b)
+
+    -- Progress count text (right side)
+    local qwProgress = QueueWidget:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    qwProgress:SetPoint("RIGHT", QueueWidget, "RIGHT", -68, 6)
+    qwProgress:SetJustifyH("RIGHT")
+    qwProgress:SetTextColor(c.accent.r, c.accent.g, c.accent.b)
+
+    -- Progress bar background
+    local qwBarBg = CreateFrame("Frame", nil, QueueWidget, "BackdropTemplate")
+    qwBarBg:SetHeight(10)
+    qwBarBg:SetPoint("BOTTOMLEFT", 10, 10)
+    qwBarBg:SetPoint("BOTTOMRIGHT", -10, 10)
+    qwBarBg:SetBackdrop(CardBackdrop)
+    qwBarBg:SetBackdropColor(0.1, 0.1, 0.15, 1)
+    qwBarBg:SetBackdropBorderColor(0.2, 0.2, 0.3, 1)
+
+    -- Progress bar fill
+    local qwBarFill = qwBarBg:CreateTexture(nil, "ARTWORK")
+    qwBarFill:SetPoint("LEFT", 1, 0)
+    qwBarFill:SetHeight(8)
+    qwBarFill:SetWidth(1)
+    qwBarFill:SetColorTexture(c.primary.r, c.primary.g, c.primary.b, 1)
+
+    -- Percentage text on the bar
+    local qwBarText = qwBarBg:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    qwBarText:SetPoint("CENTER", qwBarBg, "CENTER", 0, 0)
+    qwBarText:SetTextColor(1, 1, 1)
+
+    -- Pause button
+    local qwPauseBtn = CreateFrame("Button", nil, QueueWidget, "BackdropTemplate")
+    qwPauseBtn:SetSize(26, 26)
+    qwPauseBtn:SetPoint("TOPRIGHT", -36, -8)
+    qwPauseBtn:SetBackdrop(CardBackdrop)
+    qwPauseBtn:SetBackdropColor(c.accent.r * 0.3, c.accent.g * 0.3, c.accent.b * 0.3, 0.9)
+    qwPauseBtn:SetBackdropBorderColor(c.accent.r * 0.6, c.accent.g * 0.6, c.accent.b * 0.6, 0.8)
+
+    local qwPauseText = qwPauseBtn:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    qwPauseText:SetPoint("CENTER")
+    qwPauseText:SetText("II")
+    qwPauseText:SetTextColor(1, 1, 1)
+
+    qwPauseBtn:SetScript("OnClick", function()
+        if ACO.queuePaused then
+            ACO:ResumeQueue()
+            qwPauseText:SetText("II")
+        else
+            ACO:PauseQueue()
+            qwPauseText:SetText(">")
+        end
+    end)
+    qwPauseBtn:SetScript("OnEnter", function(self)
+        self:SetBackdropColor(c.accent.r * 0.5, c.accent.g * 0.5, c.accent.b * 0.5, 1)
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:SetText(ACO.queuePaused and ACO:Translate("QUEUE_RESUME") or ACO:Translate("QUEUE_PAUSE"))
+        GameTooltip:Show()
+    end)
+    qwPauseBtn:SetScript("OnLeave", function(self)
+        self:SetBackdropColor(c.accent.r * 0.3, c.accent.g * 0.3, c.accent.b * 0.3, 0.9)
+        GameTooltip:Hide()
+    end)
+
+    -- Cancel button
+    local qwCancelBtn = CreateFrame("Button", nil, QueueWidget, "BackdropTemplate")
+    qwCancelBtn:SetSize(26, 26)
+    qwCancelBtn:SetPoint("TOPRIGHT", -6, -8)
+    qwCancelBtn:SetBackdrop(CardBackdrop)
+    qwCancelBtn:SetBackdropColor(c.error.r * 0.3, c.error.g * 0.3, c.error.b * 0.3, 0.9)
+    qwCancelBtn:SetBackdropBorderColor(c.error.r * 0.6, c.error.g * 0.6, c.error.b * 0.6, 0.8)
+
+    local qwCancelIcon = qwCancelBtn:CreateTexture(nil, "OVERLAY")
+    qwCancelIcon:SetSize(14, 14)
+    qwCancelIcon:SetPoint("CENTER")
+    qwCancelIcon:SetAtlas("common-icon-redx")
+
+    qwCancelBtn:SetScript("OnClick", function()
+        ACO:CancelQueue()
+    end)
+    qwCancelBtn:SetScript("OnEnter", function(self)
+        self:SetBackdropColor(c.error.r * 0.5, c.error.g * 0.5, c.error.b * 0.5, 1)
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:SetText(ACO:Translate("QUEUE_CANCEL"))
+        GameTooltip:Show()
+    end)
+    qwCancelBtn:SetScript("OnLeave", function(self)
+        self:SetBackdropColor(c.error.r * 0.3, c.error.g * 0.3, c.error.b * 0.3, 0.9)
+        GameTooltip:Hide()
+    end)
+
+    -- Track initial queue size when widget first shows (for non-batch progress)
+    QueueWidget._initialTotal = 0
+    QueueWidget._hideAt = 0
+
+    QueueWidget:SetScript("OnShow", function(self)
+        self._initialTotal = #ACO.openQueue + (ACO.queueSessionOpened or 0)
+        self._hideAt = 0
+    end)
+
+    -- OnUpdate: refresh widget state
+    local qwUpdateElapsed = 0
+    QueueWidget:SetScript("OnUpdate", function(self, elapsed)
+        qwUpdateElapsed = qwUpdateElapsed + elapsed
+        if qwUpdateElapsed < 0.05 then return end
+        qwUpdateElapsed = 0
+
+        local now = GetTime()
+        local queueSize = #ACO.openQueue
+
+        -- Queue empty: show 100% briefly before hiding
+        if queueSize == 0 then
+            if self._hideAt == 0 then
+                -- First frame with empty queue: show 100% and schedule hide
+                self._hideAt = now + 1.5
+                qwTimer:SetText("")
+                qwProgress:SetText(format("%d/%d", self._initialTotal or 1, self._initialTotal or 1))
+                local barWidth = qwBarBg:GetWidth() - 2
+                if barWidth > 0 then
+                    qwBarFill:SetWidth(barWidth)
+                end
+                qwBarText:SetText("100%")
+                qwBarFill:SetColorTexture(c.success.r, c.success.g, c.success.b, 1)
+            elseif now >= self._hideAt then
+                self._hideAt = 0
+                qwBarFill:SetColorTexture(c.primary.r, c.primary.g, c.primary.b, 1)
+                self:Hide()
+            end
+            return
+        end
+
+        -- Reset hide timer if items reappear
+        self._hideAt = 0
+
+        -- Show current item
+        local entry = ACO.openQueue[1]
+        if entry then
+            local iconTex = C_Item.GetItemIconByID and C_Item.GetItemIconByID(entry.itemID)
+            qwIcon:SetTexture(iconTex or "Interface\\Icons\\INV_Misc_QuestionMark")
+
+            local itemName = entry.link and entry.link:match("%[(.-)%]")
+            if not itemName then
+                itemName = C_Item.GetItemNameByID and C_Item.GetItemNameByID(entry.itemID)
+            end
+            qwName:SetText(itemName or ("Item:" .. (entry.itemID or "?")))
+
+            -- Timer countdown (large, bright)
+            local waitTime = (entry.executeAt or 0) - now
+            if ACO.queuePaused then
+                qwTimer:SetText(ACO:Translate("QUEUE_PAUSED"))
+                qwTimer:SetTextColor(c.accent.r, c.accent.g, c.accent.b)
+            elseif waitTime > 0.1 then
+                qwTimer:SetText(format("%.1fs", waitTime))
+                qwTimer:SetTextColor(c.primary.r, c.primary.g, c.primary.b)
+            else
+                qwTimer:SetText(ACO:Translate("QUEUE_OPENING"))
+                qwTimer:SetTextColor(c.success.r, c.success.g, c.success.b)
+            end
+        end
+
+        -- Progress: use batch tracker if active, otherwise use session counter
+        local bt = ACO.batchTracker
+        local completedItems, totalItems
+        if bt and bt.active and bt.totalQueued > 0 then
+            completedItems = bt.count
+            totalItems = bt.totalQueued
+        else
+            completedItems = ACO.queueSessionOpened or 0
+            totalItems = max(self._initialTotal or 0, completedItems + queueSize)
+        end
+
+        -- Current item timer progress (0..1) — how far through countdown
+        local currentItemPct = 0
+        if entry then
+            local delay = ACO.db and ACO.db.delay or 3
+            if delay > 0 then
+                local waitTime = (entry.executeAt or 0) - now
+                currentItemPct = 1 - max(0, min(1, waitTime / delay))
+            else
+                currentItemPct = 1
+            end
+        end
+
+        -- Overall progress: completed items + fractional progress of current item
+        local pct = 0
+        if totalItems > 0 then
+            pct = (completedItems + currentItemPct) / totalItems
+            pct = max(0, min(1, pct))
+        end
+
+        -- Remaining count
+        qwProgress:SetText(format("%d/%d", completedItems, totalItems))
+
+        -- Progress bar fill (smooth)
+        local barWidth = qwBarBg:GetWidth() - 2
+        if barWidth > 0 then
+            qwBarFill:SetWidth(max(1, pct * barWidth))
+            qwBarFill:SetColorTexture(c.primary.r, c.primary.g, c.primary.b, 1)
+        end
+        qwBarText:SetText(format("%d%%", floor(pct * 100)))
+
+        -- Update pause button icon
+        if ACO.queuePaused then
+            qwPauseText:SetText(">")
+        else
+            qwPauseText:SetText("II")
+        end
+    end)
+
+    UI.queueWidget = QueueWidget
 
 end
 

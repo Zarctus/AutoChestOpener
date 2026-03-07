@@ -62,6 +62,17 @@ ACO.queueTicker = nil
 ACO.queueNextAllowedAt = 0
 ACO.queueOpenInterval = 0.25 -- seconds between uses to avoid server/UI spam
 
+-- Batch opening summary tracker
+ACO.batchTracker = {
+    active = false,
+    count = 0,
+    totalQueued = 0,
+    goldBefore = 0,
+    startTime = 0,
+}
+ACO.queuePaused = false
+ACO.queueSessionOpened = 0
+
 -- Combat deferral (itemID -> count)
 ACO.combatQueue = {}
 
@@ -209,6 +220,7 @@ local defaults = {
     debugMode = false,
     containers = {},        -- User-added container IDs
     blacklist = {},         -- Items to never auto-open
+    autoDiscovery = true,   -- Auto-detect containers when manually opened
     minimap = {
         hide = false,
     },
@@ -366,6 +378,49 @@ local CONTAINER_NAME_KEYWORDS = {
     "capsule", "war chest",              -- special containers
 }
 
+-- ============================================================================
+-- TOOLTIP-BASED CONTAINER DETECTION (Feature: tooltip scan)
+-- ============================================================================
+
+-- Hidden scanning tooltip (never shown to the player)
+local scanTooltip = CreateFrame("GameTooltip", "ACOScanTooltip", nil, "GameTooltipTemplate")
+scanTooltip:SetOwner(WorldFrame, "ANCHOR_NONE")
+
+local TOOLTIP_OPEN_KEYWORDS = {
+    "right click to open",
+    "right-click to open",
+    "click to open",
+    "clic droit pour ouvrir",
+    "cliquez pour ouvrir",
+    "rechtsklick zum \195\182ffnen",
+    "clic derecho para abrir",
+}
+
+function ACO:HasOpenableTooltip(itemID)
+    if not itemID then return false end
+    if not self:IsItemDataAvailable(itemID) then return false end
+
+    scanTooltip:SetOwner(WorldFrame, "ANCHOR_NONE")
+    scanTooltip:SetItemByID(itemID)
+
+    for i = 1, scanTooltip:NumLines() do
+        local line = _G["ACOScanTooltipTextLeft" .. i]
+        if line then
+            local text = line:GetText()
+            if text then
+                local normalized = NormalizeText(text)
+                if normalized and ContainsAnyPlain(normalized, TOOLTIP_OPEN_KEYWORDS) then
+                    scanTooltip:ClearLines()
+                    return true
+                end
+            end
+        end
+    end
+
+    scanTooltip:ClearLines()
+    return false
+end
+
 
 function ACO:IsContainerItem(itemID)
     if not itemID then return false end
@@ -435,6 +490,11 @@ function ACO:IsContainerItem(itemID)
     --    are very likely openable containers
     if not isContainer and classID == 15 and itemSpell and itemSpell ~= "" then
         isContainer = true
+    end
+
+    -- 4) Tooltip scan: "Right Click to Open" text in tooltip
+    if not isContainer then
+        isContainer = self:HasOpenableTooltip(itemID)
     end
 
     self.containerCache[itemID] = isContainer
@@ -540,7 +600,7 @@ function ACO:UseContainerFromBagSlot(itemID, bag, slot, itemLink)
     C_Container.UseContainerItem(bag, slot)
     self:RecordOpening(itemID)
 
-    if self.db and self.db.showNotifications then
+    if self.db and self.db.showNotifications and not self.batchTracker.active then
         local link = itemLink or info.hyperlink or self:FormatItemLink(itemID)
         self:Print(ACO:Translate("OPENING", link))
     end
@@ -555,6 +615,11 @@ end
 function ACO:StartQueueWorker()
     if self.queueTicker then return end
 
+    -- Show queue widget
+    if self.UI and self.UI.queueWidget then
+        self.UI.queueWidget:Show()
+    end
+
     local selfRef = self
     self.queueTicker = C_Timer.NewTicker(0.1, function()
         selfRef:ProcessQueueTick()
@@ -566,6 +631,59 @@ function ACO:StopQueueWorker()
         self.queueTicker:Cancel()
         self.queueTicker = nil
     end
+
+    -- Print batch summary if active
+    if self.batchTracker and self.batchTracker.active then
+        self:PrintBatchSummary()
+    end
+
+    -- Hide queue widget
+    if self.UI and self.UI.queueWidget then
+        self.UI.queueWidget:Hide()
+    end
+
+    -- Reset session counter
+    self.queueSessionOpened = 0
+end
+
+function ACO:PrintBatchSummary()
+    local bt = self.batchTracker
+    if not bt or not bt.active then return end
+    bt.active = false
+
+    if bt.count == 0 then return end
+
+    local goldAfter = GetMoney()
+    local goldGained = goldAfter - bt.goldBefore
+    local elapsed = GetTime() - bt.startTime
+
+    local msg = format(ACO:Translate("BATCH_SUMMARY"), bt.count, bt.totalQueued)
+
+    if goldGained > 0 then
+        msg = msg .. " " .. format(ACO:Translate("BATCH_SUMMARY_GOLD"), self:FormatMoney(goldGained))
+    end
+
+    msg = msg .. " " .. format(ACO:Translate("BATCH_SUMMARY_TIME"), format("%.1f", elapsed))
+
+    self:Print(msg)
+end
+
+function ACO:PauseQueue()
+    self.queuePaused = true
+end
+
+function ACO:ResumeQueue()
+    self.queuePaused = false
+    self:StartQueueWorker()
+end
+
+function ACO:CancelQueue()
+    wipe(self.openQueue)
+    self.queuePaused = false
+    if self.batchTracker then
+        self.batchTracker.active = false
+    end
+    self:StopQueueWorker()
 end
 
 -- Add an open request to the centralized queue
@@ -619,6 +737,8 @@ function ACO:ProcessQueueTick()
         return
     end
 
+    if self.queuePaused then return end
+
     local now = GetTime()
 
     local blocked, blockReason = self:IsOpeningBlocked()
@@ -657,6 +777,10 @@ function ACO:ProcessQueueTick()
     end
 
     if ok then
+        self.queueSessionOpened = (self.queueSessionOpened or 0) + 1
+        if self.batchTracker.active and entry.source == "OPENALL" then
+            self.batchTracker.count = self.batchTracker.count + 1
+        end
         self.queueNextAllowedAt = now + (self.queueOpenInterval or 0.25)
         return
     end
@@ -754,6 +878,13 @@ function ACO:OpenAllContainers()
     if self.db.showNotifications then
         self:Print(ACO:Translate("OPEN_ALL_RESULT", #toOpen))
     end
+
+    -- Start batch tracking for summary notification
+    self.batchTracker.active = true
+    self.batchTracker.count = 0
+    self.batchTracker.totalQueued = #toOpen
+    self.batchTracker.goldBefore = GetMoney()
+    self.batchTracker.startTime = GetTime()
 
     return #toOpen
 end
@@ -1193,6 +1324,96 @@ function ACO:ClearHistory()
 end
 
 -- ============================================================================
+-- AUTO-DISCOVERY HOOK (Feature: detect containers on manual use)
+-- ============================================================================
+
+function ACO:SetupAutoDiscoveryHook()
+    if self._autoDiscoveryHooked then return end
+    self._autoDiscoveryHooked = true
+    self._discoveredItems = {}
+
+    hooksecurefunc(C_Container, "UseContainerItem", function(bag, slot)
+        if not ACO.db or not ACO.db.enabled then return end
+        if not ACO.db.autoDiscovery then return end
+
+        local info = C_Container.GetContainerItemInfo(bag, slot)
+        if not info or not info.itemID then return end
+
+        local itemID = info.itemID
+
+        -- Already tracked or blacklisted? Skip
+        if ACO.db.containers[itemID] then return end
+        if ACO.db.blacklist and ACO.db.blacklist[itemID] then return end
+
+        -- Already discovered this session? Skip (avoid spam)
+        if ACO._discoveredItems[itemID] then return end
+
+        -- Exclude equippable items / real bags
+        if C_Item.GetItemInfoInstant then
+            local _, _, _, eqLoc, _, classID = C_Item.GetItemInfoInstant(itemID)
+            if eqLoc and eqLoc ~= "" and eqLoc ~= "INVTYPE_NON_EQUIP" then return end
+            if classID == 1 or classID == 11 then return end
+        end
+
+        -- Check if the item looks like a container
+        local isContainer = false
+
+        -- Spell text detection
+        local itemSpell = C_Item.GetItemSpell and C_Item.GetItemSpell(itemID)
+        if itemSpell and itemSpell ~= "" then
+            local spellLower = NormalizeText(itemSpell)
+            if spellLower and (ContainsAnyPlain(spellLower, OPEN_PATTERNS) or ContainsAnyPlain(spellLower, OPEN_KEYWORDS)) then
+                isContainer = true
+            end
+        end
+
+        -- Name keyword detection
+        if not isContainer then
+            local itemName = C_Item.GetItemNameByID and C_Item.GetItemNameByID(itemID)
+            if itemName then
+                local nameLower = NormalizeText(itemName)
+                if nameLower and ContainsAnyPlain(nameLower, CONTAINER_NAME_KEYWORDS) then
+                    isContainer = true
+                end
+            end
+        end
+
+        -- Tooltip detection
+        if not isContainer then
+            isContainer = ACO:HasOpenableTooltip(itemID)
+        end
+
+        -- ClassID heuristic (class 15 + any spell)
+        if not isContainer and itemSpell and itemSpell ~= "" then
+            if C_Item.GetItemInfoInstant then
+                local _, _, _, _, _, classID = C_Item.GetItemInfoInstant(itemID)
+                if classID == 15 then
+                    isContainer = true
+                end
+            end
+        end
+
+        if isContainer then
+            ACO._discoveredItems[itemID] = true
+            -- Add to tracked list silently (we print our own message)
+            ACO.db.containers[itemID] = true
+            ACO.containerCache[itemID] = nil
+
+            local link = info.hyperlink or ACO:FormatItemLink(itemID)
+            ACO:Print(format(ACO:Translate("AUTO_DISCOVER_PROMPT"), link, itemID))
+
+            if ACO.db.notificationSound then
+                PlaySound(ACO.SOUNDS.ADD)
+            end
+
+            if ACO.UI and ACO.UI.RefreshList then
+                ACO.UI:RefreshList()
+            end
+        end
+    end)
+end
+
+-- ============================================================================
 -- EVENT HANDLING
 -- ============================================================================
 
@@ -1232,6 +1453,9 @@ events["ADDON_LOADED"] = function(self, addonLoaded)
 end
 
 events["PLAYER_ENTERING_WORLD"] = function(self, isInitialLogin, isReloadingUi)
+    -- Setup auto-discovery hook
+    ACO:SetupAutoDiscoveryHook()
+
     -- Initialize bag state after a short delay without triggering openings
     C_Timer.After(1, function()
         if ACO.db then

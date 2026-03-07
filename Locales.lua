@@ -121,6 +121,21 @@ L["enUS"] = {
     PENDING_TITLE = "Pending containers",
     PENDING_HINT = "Click an item to try opening it. If Blizzard requires a secure click, a button will appear.",
     CANNOT_OPEN_AUTO = "Cannot open automatically:",
+    -- Auto-discovery
+    AUTO_DISCOVER_PROMPT = "%s detected as openable container! Added to tracked list. (/aco remove %d to undo)",
+    ENABLE_AUTO_DISCOVER = "Auto-discover containers",
+    ENABLE_AUTO_DISCOVER_TOOLTIP = "Automatically track containers when you manually open them",
+    -- Batch summary
+    BATCH_SUMMARY = "Summary: %d/%d containers opened.",
+    BATCH_SUMMARY_GOLD = "Gold earned: %s",
+    BATCH_SUMMARY_TIME = "(%ss)",
+    -- Queue widget
+    QUEUE_OPENING = "Opening...",
+    QUEUE_PAUSED = "Paused",
+    QUEUE_REMAINING = "%d remaining",
+    QUEUE_CANCEL = "Cancel",
+    QUEUE_PAUSE = "Pause",
+    QUEUE_RESUME = "Resume",
 }
 
 L["frFR"] = {
@@ -239,6 +254,21 @@ L["frFR"] = {
     PENDING_TITLE = "Conteneurs en attente",
     PENDING_HINT = "Clique un item pour tenter de l'ouvrir. Si Blizzard exige un clic sécurisé, un bouton apparaîtra.",
     CANNOT_OPEN_AUTO = "Impossible d\'ouvrir automatiquement : ",
+    -- Auto-découverte
+    AUTO_DISCOVER_PROMPT = "%s détecté comme conteneur ouvrable ! Ajouté à la liste. (/aco remove %d pour annuler)",
+    ENABLE_AUTO_DISCOVER = "Auto-découverte des conteneurs",
+    ENABLE_AUTO_DISCOVER_TOOLTIP = "Ajoute automatiquement les conteneurs quand vous les ouvrez manuellement",
+    -- Résumé de lot
+    BATCH_SUMMARY = "Résumé : %d/%d conteneurs ouverts.",
+    BATCH_SUMMARY_GOLD = "Or gagné : %s",
+    BATCH_SUMMARY_TIME = "(%ss)",
+    -- Widget file d'attente
+    QUEUE_OPENING = "Ouverture...",
+    QUEUE_PAUSED = "En pause",
+    QUEUE_REMAINING = "%d restant(s)",
+    QUEUE_CANCEL = "Annuler",
+    QUEUE_PAUSE = "Pause",
+    QUEUE_RESUME = "Reprendre",
 }
 
 -- Fallback to enUS for missing keys
