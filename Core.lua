@@ -140,10 +140,30 @@ function ACO:IsOpeningBlocked()
         return true, "AUCTION"
     end
 
-    -- Mail (+ TSM compatibility via rawget)
-    local tsmMail = rawget(_G, "TSM_MailingFrame")
-    if b.mail or (MailFrame and MailFrame:IsShown()) or (tsmMail and tsmMail.IsShown and tsmMail:IsShown()) then
+    -- Mail (+ TSM compatibility)
+    local mailFrameVisible = MailFrame and MailFrame:IsShown()
+    local tsmMailVisible = false
+    -- Modern TSM exposes TSM_API.IsUIVisible; legacy TSM used a global frame
+    local tsmAPI = rawget(_G, "TSM_API")
+    if tsmAPI and tsmAPI.IsUIVisible then
+        tsmMailVisible = tsmAPI.IsUIVisible("MAILING")
+    else
+        local tsmMail = rawget(_G, "TSM_MailingFrame")
+        if tsmMail and tsmMail.IsShown then
+            tsmMailVisible = tsmMail:IsShown()
+        end
+    end
+    if mailFrameVisible or tsmMailVisible then
         return true, "MAIL"
+    end
+    -- Auto-clear stale mail blocker: if the flag was set but no mail frame is
+    -- actually visible, TSM (or another addon) likely closed the mailbox
+    -- without MAIL_CLOSED reaching us.  Clear it so items are not stuck.
+    if b.mail then
+        self:SetBlocker("mail", false)
+        if self.db and self.db.debugMode then
+            self:Debug("Auto-cleared stale 'mail' blocker (no mail frame visible)")
+        end
     end
 
     -- Bank
