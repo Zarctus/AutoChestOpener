@@ -55,6 +55,7 @@ ACO.goldTracker = {
     goldBefore = 0,
     pendingItemID = nil,
 }
+ACO.goldTrackerQueue = {}  -- queue-based gold tracking for batch openings
 
 -- Centralized open queue worker
 ACO.openQueue = {}
@@ -1111,11 +1112,11 @@ function ACO:RecordOpening(itemID)
     end
     stats.lastOpen = currentTime
     
-    -- Start gold tracking
-    self:StartGoldTracking(itemID)
+    -- Add to history first (gold will be updated later via tracker)
+    local historyEntry = self:AddToHistory(itemID, currentTime)
     
-    -- Add to history (gold will be updated later)
-    self:AddToHistory(itemID, currentTime)
+    -- Start gold tracking with direct reference to the history entry
+    self:StartGoldTracking(itemID, historyEntry)
     
     -- Refresh UI if stats tab is visible
     if self.UI and self.UI.RefreshStats then
@@ -1123,49 +1124,89 @@ function ACO:RecordOpening(itemID)
     end
 end
 
--- Start tracking gold before container opens
-function ACO:StartGoldTracking(itemID)
-    self.goldTracker.isTracking = true
-    self.goldTracker.goldBefore = GetMoney()
-    self.goldTracker.pendingItemID = itemID
-    self.goldTracker.startTime = time()
-    
-    -- Check for gold change at multiple intervals (server lag resilience)
+-- Start tracking gold for a specific container opening.
+-- Uses a queue so that rapid batch openings don't clobber each other.
+function ACO:StartGoldTracking(itemID, historyEntry)
+    local goldNow = GetMoney()
+
+    -- Try to finalize any already-pending trackers whose gold has arrived
+    self:ProcessGoldTrackers(goldNow)
+
+    -- Push a new tracker for this opening
+    local tracker = {
+        goldBefore = goldNow,
+        historyEntry = historyEntry,
+        itemID = itemID,
+        resolved = false,
+    }
+    tinsert(self.goldTrackerQueue, tracker)
+
+    -- Schedule delayed processing (server-lag resilience)
     local selfRef = self
-    C_Timer.After(0.5, function() selfRef:CheckGoldGained() end)
-    C_Timer.After(1.5, function() selfRef:CheckGoldGained() end)
+    C_Timer.After(0.5, function() selfRef:ProcessGoldTrackers(GetMoney()) end)
+    C_Timer.After(1.5, function() selfRef:ProcessGoldTrackers(GetMoney()) end)
+    C_Timer.After(5.0, function() selfRef:CleanupGoldTrackers() end)
 end
 
--- Check if gold was gained from container
-function ACO:CheckGoldGained()
-    if not self.goldTracker.isTracking then return end
-    
-    local goldAfter = GetMoney()
-    local goldGained = goldAfter - self.goldTracker.goldBefore
-    
-    if goldGained > 0 then
-        local stats = self.db.stats
-        stats.totalGold = (stats.totalGold or 0) + goldGained
-        stats.sessionGold = (stats.sessionGold or 0) + goldGained
-        
-        -- Update the most recent history entry with gold info
-        if self.db.history and #self.db.history > 0 then
-            self.db.history[1].goldGained = goldGained
-        end
-        
-        self:Debug(format("Or gagn\195\169: %s", self:FormatMoney(goldGained)))
-        
-        -- Refresh UI
-        if self.UI and self.UI.RefreshStats then
-            self.UI:RefreshStats()
-        end
-        if self.UI and self.UI.RefreshHistory then
-            self.UI:RefreshHistory()
+-- Walk the tracker queue and finalise every entry whose gold delta is known.
+function ACO:ProcessGoldTrackers(goldNow)
+    local queue = self.goldTrackerQueue
+    local i = 1
+    while i <= #queue do
+        if queue[i].resolved then
+            tremove(queue, i)
+        else
+            -- For tracker i the gold-after boundary is:
+            --   * goldBefore of the NEXT tracker (if one exists), or
+            --   * the current GetMoney() for the last (most recent) tracker.
+            local goldAfter
+            if queue[i + 1] then
+                goldAfter = queue[i + 1].goldBefore
+            else
+                goldAfter = goldNow
+            end
+
+            local goldGained = goldAfter - queue[i].goldBefore
+            if goldGained > 0 then
+                self:FinalizeGoldTracker(queue[i], goldGained)
+                tremove(queue, i)
+            else
+                i = i + 1
+            end
         end
     end
-    
-    self.goldTracker.isTracking = false
-    self.goldTracker.pendingItemID = nil
+end
+
+-- Apply the gold result to a single tracker's history entry and stats.
+function ACO:FinalizeGoldTracker(tracker, goldGained)
+    if tracker.resolved then return end
+    tracker.resolved = true
+
+    local stats = self.db.stats
+    stats.totalGold  = (stats.totalGold  or 0) + goldGained
+    stats.sessionGold = (stats.sessionGold or 0) + goldGained
+
+    if tracker.historyEntry then
+        tracker.historyEntry.goldGained = goldGained
+    end
+
+    self:Debug(format("Or gagn\195\169: %s", self:FormatMoney(goldGained)))
+
+    if self.UI and self.UI.RefreshStats then
+        self.UI:RefreshStats()
+    end
+    if self.UI and self.UI.RefreshHistory then
+        self.UI:RefreshHistory()
+    end
+end
+
+-- Safety net: discard trackers that never received gold after a long timeout.
+function ACO:CleanupGoldTrackers()
+    local queue = self.goldTrackerQueue
+    -- Final attempt with current gold
+    self:ProcessGoldTrackers(GetMoney())
+    -- Any remaining unresolved trackers are containers that gave no gold – discard them.
+    wipe(queue)
 end
 
 -- Format money (copper) to gold/silver/copper string
@@ -1233,6 +1274,8 @@ function ACO:AddToHistory(itemID, timestamp)
     while #history > maxSize do
         tremove(history)
     end
+
+    return entry
 end
 
 -- Get formatted statistics
