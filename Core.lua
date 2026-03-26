@@ -1,7 +1,7 @@
 --[[
     Auto Chest Opener - Core Module
-    Automatically opens chests, bags and containers after receiving them
-    Version: 2.0.0
+    Automatically opens all types of containers, chests, bags, crates, lockboxes, gifts and more
+    Version: 2.1.0
 ]]
 
 local addonName, ACO = ...
@@ -47,7 +47,7 @@ local tocVersion = (C_AddOns and C_AddOns.GetAddOnMetadata and C_AddOns.GetAddOn
 if tocVersion == "@project-version@" then
     tocVersion = nil
 end
-ACO.version = (tocVersion and tocVersion ~= "" ) and tocVersion or "2.0.0"
+ACO.version = (tocVersion and tocVersion ~= "" ) and tocVersion or "2.1.0"
 ACO.pendingItems = {}
 ACO.itemQueue = {}
 ACO.goldTracker = {
@@ -361,42 +361,127 @@ end
 
 
 -- Mots-clés (recherche "plain", pas de patterns Lua) pour détecter des objets ouvrables.
--- Note: On reste volontairement assez conservateur pour éviter les faux positifs.
+-- Couvre toutes les langues supportées par WoW pour un maximum de détection.
 local OPEN_PATTERNS = {
     "open",      -- EN: open, opens, opening
     "ouvr",      -- FR: ouvrir, ouvrez, ouvrant, ouvre
     "öffn",      -- DE: öffnen, öffnet
-    "abr",       -- ES: abrir, abre
+    "abr",       -- ES: abrir, abre (also PT "abrir")
     "откр",      -- RU: открыть, открывать
     "열",        -- KR: 열기
+    "打开",      -- zhCN: 打开 (open)
+    "打開",      -- zhTW: 打開 (open)
+    "apr",       -- IT: aprire, apri
 }
 
 local OPEN_KEYWORDS = {
-    "unwrap", "déballer", "auspacken",  -- wrapped items
-    "use", "utiliser", "utilisez",      -- some containers use "use"
-    "loot", "piller",                   -- loot keywords
-    "salvage", "récupér",               -- salvage crates
-    "click", "cliqu",                   -- click to open
-    "reveal", "unpack",                 -- reveal/unpack containers
-    "crack",                            -- crack open
-    "contain",                          -- "contains" in spell text
+    -- EN
+    "unwrap", "unpack", "reveal", "crack",
+    "loot", "salvage", "disassemble",
+    "click to open", "right click to open", "right-click to open",
+    "use:", "contain",
+    "rummage", "pillage", "plunder", "ransack",
+    "unseal", "uncork", "unbox",
+    -- FR
+    "déballer", "utiliser", "utilisez",
+    "piller", "récupér",
+    "cliqu", "fouill",
+    "ouvrir", "ouvre",
+    -- DE
+    "auspacken", "benutzen", "verwenden",
+    "plünder",
+    -- ES
+    "desempaquetar", "usar", "utilizar",
+    "saquear",
+    -- PT
+    "desembrulhar", "desembalar",
+    -- IT
+    "scartare", "usare",
+    -- RU
+    "использ", "распаков",
 }
 
 local CONTAINER_NAME_KEYWORDS = {
-    "cache", "coffre", "coffret", "chest", "crate", "caisse",
-    "sack", "sac", "sacoche",
-    "bag", "box", "boîte", "bundle", "lot",
-    "satchel",                           -- "Satchel of ..."
-    "treasure", "trésor", "salvage", "récupération",
-    "parcel", "colis", "package", "paquet",
-    "pouch", "bourse", "purse",
-    "coffer", "lockbox", "strongbox",    -- PvP/Delves containers
-    "hoard", "trove", "stash",           -- treasure hoards
-    "supply", "provisions",              -- supply crates
-    "reward", "récompense",              -- reward containers
-    "gift", "cadeau", "present",         -- holiday items
-    "mystery", "bounty", "casket",       -- various containers
-    "capsule", "war chest",              -- special containers
+    -- Chests / Coffres
+    "chest", "coffre", "coffret", "truhe", "cofre", "baú", "baul",
+    "war chest", "treasure chest",
+    -- Crates / Caisses
+    "crate", "caisse", "kiste", "cajón", "caixa",
+    -- Boxes / Boîtes
+    "box", "boîte", "boite", "schachtel", "caja",
+    -- Bags / Sacs (openable reward bags, not equippable)
+    "bag of", "sac de", "sac d'",
+    "supply bag", "reward bag",
+    -- Sacks / Sacs
+    "sack", "sac ", "sacoche",
+    -- Satchels
+    "satchel", "sacoche",
+    -- Bundles
+    "bundle", "lot", "bündel", "lote", "fardo",
+    -- Pouches / Bourses
+    "pouch", "bourse", "purse", "beutel", "bolsa",
+    -- Parcels / Colis
+    "parcel", "colis", "package", "paquet", "paket", "paquete",
+    -- Lockboxes / Coffres-forts (PvP, rogue)
+    "lockbox", "strongbox", "coffer",
+    "battered ", "steel-bound",
+    -- Treasure / Trésor
+    "treasure", "trésor", "schatz", "tesoro",
+    -- Salvage
+    "salvage", "récupération", "bergung", "rescate",
+    -- Cache (common WoW container)
+    "cache",
+    -- Hoards / Troves / Stash
+    "hoard", "trove", "stash",
+    -- Supply / Provisions
+    "supply", "provisions", "vorrat", "suministro",
+    -- Reward / Récompense
+    "reward", "récompense", "belohnung", "recompensa",
+    -- Gifts / Cadeaux (holiday)
+    "gift", "cadeau", "present", "geschenk", "regalo",
+    "wrapping", "emballage", "wrapped",
+    "winter veil", "feast of winter",
+    "lunar festival", "love is in the air",
+    "noblegarden", "midsummer",
+    "brewfest", "hallow", "pilgrim",
+    -- Mystery / Bounty / Casket
+    "mystery", "bounty", "casket", "mystère",
+    -- War / PvP
+    "war supply", "conquest", "honor",
+    -- Capsule
+    "capsule",
+    -- Profession crates/bags
+    "reagent", "recipe",
+    -- Mission rewards
+    "mission", "garrison", "shipment",
+    -- Emissary / Calling / World quest containers
+    "emissary", "calling", "émissaire",
+    -- Delves / TWW containers
+    "delve", "vault", "coalescing",
+    "bountiful", "restored",
+    -- WoD specific
+    "follower", "champion",
+    -- Misc
+    "loot-filled", "plunder",
+    "container", "conteneur",
+    "piñata", "pinata",
+    "egg", "oeuf", -- Noblegarden eggs
+    "clam", "palourde", -- Clams
+    "token", "jeton",
+    "kit",
+    "envelope", "enveloppe",
+    "grab bag",
+    "care package",
+    "spoils", "butin",
+    "jackpot",
+    "dispatch",
+    "shipment", "livraison",
+    "footlocker", "malle",
+    "barrel", "tonneau", "fass",
+    "urn", "urne",
+    "jar", "jarre",
+    "basket", "panier", "korb",
+    "carton",
 }
 
 -- ============================================================================
@@ -408,19 +493,77 @@ local scanTooltip = CreateFrame("GameTooltip", "ACOScanTooltip", nil, "GameToolt
 scanTooltip:SetOwner(WorldFrame, "ANCHOR_NONE")
 
 local TOOLTIP_OPEN_KEYWORDS = {
+    -- EN
     "right click to open",
     "right-click to open",
     "click to open",
+    "<right click to open>",
+    "open the",
+    -- FR
     "clic droit pour ouvrir",
     "cliquez pour ouvrir",
+    "<clic droit pour ouvrir>",
+    -- DE
     "rechtsklick zum \195\182ffnen",
+    "rechtsklicken zum \195\182ffnen",
+    "<rechtsklick zum \195\182ffnen>",
+    -- ES
     "clic derecho para abrir",
+    "haz clic con el bot\195\179n derecho para abrir",
+    "<clic derecho para abrir>",
+    -- PT
+    "clique com o bot\195\163o direito para abrir",
+    "clique para abrir",
+    -- IT
+    "clic destro per aprire",
+    "clicca per aprire",
+    -- RU
+    "\208\189\208\176\208\182\208\188\208\184\209\130\208\181 \208\191\209\128\208\176\208\178\209\131\209\142", -- нажмите правую
 }
+
+-- Modern tooltip API (C_TooltipInfo, available since 10.0.2)
+-- Falls back to the old GameTooltip scanning if unavailable.
+function ACO:HasOpenableTooltipModern(itemID)
+    if not C_TooltipInfo or not C_TooltipInfo.GetItemByID then
+        return false
+    end
+
+    local data = C_TooltipInfo.GetItemByID(itemID)
+    if not data or not data.lines then return false end
+
+    for _, lineData in ipairs(data.lines) do
+        local text = lineData.leftText
+        if text then
+            local normalized = NormalizeText(text)
+            if normalized and ContainsAnyPlain(normalized, TOOLTIP_OPEN_KEYWORDS) then
+                return true
+            end
+            -- Green "Use:" text lines (type 0, green color ~= {0, 1, 0})
+            -- These indicate an active use effect
+            if lineData.leftColor then
+                local clr = lineData.leftColor
+                -- Green text = Use: effect (r < 0.1, g > 0.9, b < 0.1)
+                if clr.r and clr.g and clr.r < 0.15 and clr.g > 0.85 and (clr.b or 0) < 0.15 then
+                    if normalized and (ContainsAnyPlain(normalized, OPEN_PATTERNS) or ContainsAnyPlain(normalized, OPEN_KEYWORDS)) then
+                        return true
+                    end
+                end
+            end
+        end
+    end
+    return false
+end
 
 function ACO:HasOpenableTooltip(itemID)
     if not itemID then return false end
     if not self:IsItemDataAvailable(itemID) then return false end
 
+    -- Try modern API first (more reliable, no hidden frame needed)
+    if C_TooltipInfo and C_TooltipInfo.GetItemByID then
+        return self:HasOpenableTooltipModern(itemID)
+    end
+
+    -- Fallback: old GameTooltip scanning
     scanTooltip:SetOwner(WorldFrame, "ANCHOR_NONE")
     scanTooltip:SetItemByID(itemID)
 
@@ -507,15 +650,43 @@ function ACO:IsContainerItem(itemID)
         end
     end
 
-    -- 3) Class-based heuristic: Miscellaneous (15) items with any Use: spell
-    --    are very likely openable containers
+    -- 3) Class-based heuristic: Miscellaneous (15) with any Use: spell
+    --    Very common for openable containers (subclass 0/Junk, 3/Holiday, 4/Other)
     if not isContainer and classID == 15 and itemSpell and itemSpell ~= "" then
-        isContainer = true
+        -- Exclude companion pets (subclass 2), mounts (subclass 5), mount equipment (subclass 6)
+        if subClassID ~= 2 and subClassID ~= 5 and subClassID ~= 6 then
+            isContainer = true
+        end
     end
 
-    -- 4) Tooltip scan: "Right Click to Open" text in tooltip
+    -- 3b) Consumable (0) subclass Other (8) with an open/use spell = openable container
+    if not isContainer and classID == 0 and subClassID == 8 and itemSpell and itemSpell ~= "" then
+        local spellLower = NormalizeText(itemSpell)
+        if spellLower and (ContainsAnyPlain(spellLower, OPEN_PATTERNS) or ContainsAnyPlain(spellLower, OPEN_KEYWORDS)) then
+            isContainer = true
+        end
+    end
+
+    -- 3c) Consumable (0) subclass Generic (0) with open spell
+    if not isContainer and classID == 0 and subClassID == 0 and itemSpell and itemSpell ~= "" then
+        local spellLower = NormalizeText(itemSpell)
+        if spellLower and (ContainsAnyPlain(spellLower, OPEN_PATTERNS) or ContainsAnyPlain(spellLower, OPEN_KEYWORDS)) then
+            isContainer = true
+        end
+    end
+
+    -- 4) Tooltip scan: "Right Click to Open" or green "Use:" text in tooltip
     if not isContainer then
         isContainer = self:HasOpenableTooltip(itemID)
+    end
+
+    -- 5) Additional: Quest items (class 12) with open spell text
+    --    Some quest reward containers are class 12
+    if not isContainer and classID == 12 and itemSpell and itemSpell ~= "" then
+        local spellLower = NormalizeText(itemSpell)
+        if spellLower and ContainsAnyPlain(spellLower, OPEN_PATTERNS) then
+            isContainer = true
+        end
     end
 
     self.containerCache[itemID] = isContainer
@@ -872,13 +1043,16 @@ function ACO:OpenAllContainers()
     local toOpen = {}
     local containers = self.db.containers
     
-    -- Collect all containers in bags (tracked list + reagent bag)
+    -- Collect all containers in bags (tracked list + auto-detected openable items)
     for _, bag in ipairs(self:GetTrackedBags()) do
         local numSlots = C_Container.GetContainerNumSlots(bag) or 0
         for slot = 1, numSlots do
             local info = C_Container.GetContainerItemInfo(bag, slot)
-            if info and info.itemID and containers[info.itemID] then
-                tinsert(toOpen, {bag = bag, slot = slot, itemID = info.itemID, link = info.hyperlink})
+            if info and info.itemID then
+                -- Include items from tracked list OR auto-detected as openable
+                if containers[info.itemID] or self:CanQueueContainerItem(info.itemID) then
+                    tinsert(toOpen, {bag = bag, slot = slot, itemID = info.itemID, link = info.hyperlink})
+                end
             end
         end
     end
@@ -1418,43 +1592,10 @@ function ACO:SetupAutoDiscoveryHook()
             if classID == 1 or classID == 11 then return end
         end
 
-        -- Check if the item looks like a container
-        local isContainer = false
-
-        -- Spell text detection
-        local itemSpell = C_Item.GetItemSpell and C_Item.GetItemSpell(itemID)
-        if itemSpell and itemSpell ~= "" then
-            local spellLower = NormalizeText(itemSpell)
-            if spellLower and (ContainsAnyPlain(spellLower, OPEN_PATTERNS) or ContainsAnyPlain(spellLower, OPEN_KEYWORDS)) then
-                isContainer = true
-            end
-        end
-
-        -- Name keyword detection
-        if not isContainer then
-            local itemName = C_Item.GetItemNameByID and C_Item.GetItemNameByID(itemID)
-            if itemName then
-                local nameLower = NormalizeText(itemName)
-                if nameLower and ContainsAnyPlain(nameLower, CONTAINER_NAME_KEYWORDS) then
-                    isContainer = true
-                end
-            end
-        end
-
-        -- Tooltip detection
-        if not isContainer then
-            isContainer = ACO:HasOpenableTooltip(itemID)
-        end
-
-        -- ClassID heuristic (class 15 + any spell)
-        if not isContainer and itemSpell and itemSpell ~= "" then
-            if C_Item.GetItemInfoInstant then
-                local _, _, _, _, _, classID = C_Item.GetItemInfoInstant(itemID)
-                if classID == 15 then
-                    isContainer = true
-                end
-            end
-        end
+        -- Use IsContainerItem which has all the improved detection logic
+        -- (invalidate cache first so it's checked fresh)
+        ACO.containerCache[itemID] = nil
+        local isContainer = ACO:IsContainerItem(itemID)
 
         if isContainer then
             ACO._discoveredItems[itemID] = true
