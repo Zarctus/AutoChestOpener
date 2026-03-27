@@ -535,12 +535,17 @@ function ACO:InitUI()
     PendingContent:SetPoint("BOTTOMRIGHT", MainFrame, "BOTTOMRIGHT", 0, 0)
     PendingContent:Hide()
 
+    local LootContent = CreateFrame("Frame", nil, MainFrame)
+    LootContent:SetPoint("TOPLEFT", TabContainer, "BOTTOMLEFT", 0, 0)
+    LootContent:SetPoint("BOTTOMRIGHT", MainFrame, "BOTTOMRIGHT", 0, 0)
+    LootContent:Hide()
+
     UI.tabs = {}
     UI.currentTab = "containers"
     
     local function CreateTab(parent, text, icon, tabKey, xOffset)
         local tab = CreateFrame("Button", nil, parent, "BackdropTemplate")
-        tab:SetSize(130, TAB_HEIGHT)
+        tab:SetSize(105, TAB_HEIGHT)
         tab:SetPoint("LEFT", xOffset, 0)
         tab:SetBackdrop(CardBackdrop)
         
@@ -593,9 +598,10 @@ function ACO:InitUI()
     end
     
     local containersTab = CreateTab(TabContainer, ACO:Translate("TAB_CONTAINERS"), "VignetteLootChest", "containers", PADDING)
-    local statsTab = CreateTab(TabContainer, ACO:Translate("TAB_STATS"), "poi-workorders", "stats", PADDING + 134)
-    local historyTab = CreateTab(TabContainer, ACO:Translate("TAB_HISTORY"), "communities-icon-clock", "history", PADDING + 268)
-    local pendingTab = CreateTab(TabContainer, ACO:Translate("TAB_PENDING"), "QuestNormal", "pending", PADDING + 402)
+    local statsTab = CreateTab(TabContainer, ACO:Translate("TAB_STATS"), "poi-workorders", "stats", PADDING + 108)
+    local historyTab = CreateTab(TabContainer, ACO:Translate("TAB_HISTORY"), "communities-icon-clock", "history", PADDING + 216)
+    local pendingTab = CreateTab(TabContainer, ACO:Translate("TAB_PENDING"), "QuestNormal", "pending", PADDING + 324)
+    local lootTab = CreateTab(TabContainer, ACO:Translate("TAB_LOOT"), "auctionhouse", "loot", PADDING + 432)
     
     function UI:SwitchTab(tabKey)
         self.currentTab = tabKey
@@ -605,6 +611,7 @@ function ACO:InitUI()
         StatsContent:Hide()
         HistoryContent:Hide()
         PendingContent:Hide()
+        LootContent:Hide()
         
         -- Deactivate all tabs
         for _, tab in pairs(self.tabs) do
@@ -629,6 +636,9 @@ function ACO:InitUI()
         elseif tabKey == "pending" then
             PendingContent:Show()
             self:RefreshPendingList()
+        elseif tabKey == "loot" then
+            LootContent:Show()
+            self:RefreshLootSummary()
         end
     end
     
@@ -1560,6 +1570,314 @@ end
     end
     
     -- ========================================================================
+    -- LOOT SUMMARY TAB CONTENT
+    -- ========================================================================
+    
+    local LootPanel = CreateFrame("Frame", nil, LootContent, "BackdropTemplate")
+    LootPanel:SetPoint("TOPLEFT", PADDING, -PADDING)
+    LootPanel:SetPoint("BOTTOMRIGHT", -PADDING, PADDING)
+    LootPanel:SetBackdrop(CardBackdrop)
+    LootPanel:SetBackdropColor(c.backgroundLight.r, c.backgroundLight.g, c.backgroundLight.b, 0.5)
+    LootPanel:SetBackdropBorderColor(c.primary.r * 0.3, c.primary.g * 0.3, c.primary.b * 0.3, 0.5)
+    
+    -- Loot title
+    local LootIcon = LootPanel:CreateTexture(nil, "ARTWORK")
+    LootIcon:SetSize(20, 20)
+    LootIcon:SetPoint("TOPLEFT", PADDING, -PADDING)
+    LootIcon:SetAtlas("auctionhouse")
+    
+    local LootTitle = LootPanel:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+    LootTitle:SetPoint("LEFT", LootIcon, "RIGHT", 8, 0)
+    LootTitle:SetText(ACO:Translate("LOOT_TITLE"))
+    LootTitle:SetTextColor(c.primary.r, c.primary.g, c.primary.b)
+    
+    local LootHint = LootPanel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    LootHint:SetPoint("TOPLEFT", LootTitle, "BOTTOMLEFT", 0, -2)
+    LootHint:SetText(ACO:Translate("LOOT_HINT"))
+    LootHint:SetTextColor(c.textDim.r, c.textDim.g, c.textDim.b)
+    
+    -- Clear Loot Button
+    local ClearLootBtn = CreateModernButton(LootPanel, ACO:Translate("CLEAR_LOOT_BTN"), 100, 24, false)
+    ClearLootBtn:SetPoint("TOPRIGHT", -PADDING, -PADDING)
+    ClearLootBtn:SetScript("OnClick", function()
+        StaticPopup_Show("ACO_CLEAR_LOOT")
+    end)
+    
+    -- Export CSV button
+    local ExportCSVBtn = CreateModernButton(LootPanel, ACO:Translate("EXPORT_CSV_BTN"), 80, 24, false)
+    ExportCSVBtn:SetPoint("RIGHT", ClearLootBtn, "LEFT", -6, 0)
+    ExportCSVBtn:SetScript("OnClick", function()
+        local csv = ACO:ExportLootCSV()
+        if csv == "" then
+            ACO:Print(ACO:Translate("EXPORT_LOOT_EMPTY"))
+            return
+        end
+        ACO:ShowLootExportFrame(csv, "EXPORT_LOOT_CSV_TITLE")
+    end)
+    
+    -- Export JSON button
+    local ExportJSONBtn = CreateModernButton(LootPanel, ACO:Translate("EXPORT_JSON_BTN"), 80, 24, false)
+    ExportJSONBtn:SetPoint("RIGHT", ExportCSVBtn, "LEFT", -6, 0)
+    ExportJSONBtn:SetScript("OnClick", function()
+        local json = ACO:ExportLootJSON()
+        if json == "[]" then
+            ACO:Print(ACO:Translate("EXPORT_LOOT_EMPTY"))
+            return
+        end
+        ACO:ShowLootExportFrame(json, "EXPORT_LOOT_JSON_TITLE")
+    end)
+    
+    -- Loot scroll frame
+    local LootScrollFrame = CreateFrame("ScrollFrame", nil, LootPanel, "UIPanelScrollFrameTemplate")
+    LootScrollFrame:SetPoint("TOPLEFT", PADDING, -60)
+    LootScrollFrame:SetPoint("BOTTOMRIGHT", -PADDING - 20, PADDING)
+    
+    local LootScrollChild = CreateFrame("Frame", nil, LootScrollFrame)
+    LootScrollChild:SetSize(LootScrollFrame:GetWidth(), 1)
+    LootScrollFrame:SetScrollChild(LootScrollChild)
+    
+    UI.lootItems = {}
+    UI.lootExpandedContainers = {} -- [containerID] = bool 
+    
+    function UI:RefreshLootSummary()
+        -- Clear existing items
+        for _, item in ipairs(self.lootItems) do
+            item:Hide()
+            item:SetParent(nil)
+        end
+        wipe(self.lootItems)
+        
+        local lootData = ACO:GetLootSummary()
+        
+        if #lootData == 0 then
+            if not self.lootEmptyText then
+                self.lootEmptyText = LootScrollChild:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+                self.lootEmptyText:SetPoint("CENTER", 0, 50)
+                self.lootEmptyText:SetText(ACO:Translate("LOOT_EMPTY"))
+            end
+            self.lootEmptyText:Show()
+            LootScrollChild:SetHeight(100)
+            return
+        end
+        
+        if self.lootEmptyText then
+            self.lootEmptyText:Hide()
+        end
+        
+        local scrollWidth = LootScrollFrame:GetWidth() - 10
+        local yOffset = 0
+        
+        for _, containerData in ipairs(lootData) do
+            local cid = containerData.containerID
+            local isExpanded = self.lootExpandedContainers[cid]
+            
+            -- ============================================================
+            -- Container header row (clickable accordion)
+            -- ============================================================
+            local header = CreateFrame("Frame", nil, LootScrollChild, "BackdropTemplate")
+            header:SetSize(scrollWidth, 48)
+            header:SetPoint("TOPLEFT", 0, -yOffset)
+            header:SetBackdrop(CardBackdrop)
+            header:SetBackdropColor(c.primary.r * 0.15, c.primary.g * 0.15, c.primary.b * 0.15, 1)
+            header:SetBackdropBorderColor(c.primary.r * 0.4, c.primary.g * 0.4, c.primary.b * 0.4, 0.8)
+            tinsert(self.lootItems, header)
+            
+            -- Expand/collapse indicator (Atlas texture)
+            local arrow = header:CreateTexture(nil, "OVERLAY")
+            arrow:SetSize(12, 12)
+            arrow:SetPoint("LEFT", 6, 0)
+            if isExpanded then
+                arrow:SetAtlas("common-dropdown-icon-open")
+            else
+                arrow:SetAtlas("common-dropdown-icon-closed")
+            end
+            
+            -- Container icon
+            local hIcon = header:CreateTexture(nil, "ARTWORK")
+            hIcon:SetSize(28, 28)
+            hIcon:SetPoint("LEFT", 22, 0)
+            local containerIcon = C_Item.GetItemIconByID(containerData.containerID)
+            hIcon:SetTexture(containerIcon or "Interface\\Icons\\INV_Misc_QuestionMark")
+            
+            -- Container name
+            local hName = header:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+            hName:SetPoint("LEFT", hIcon, "RIGHT", 10, 6)
+            hName:SetWidth(190)
+            hName:SetJustifyH("LEFT")
+            
+            local containerName = C_Item.GetItemInfo(containerData.containerID)
+            if containerName then
+                hName:SetText(containerName)
+            else
+                hName:SetText("|cff888888" .. ACO:Translate("LOADING") .. "|r")
+                local itemObj = Item:CreateFromItemID(containerData.containerID)
+                itemObj:ContinueOnItemLoad(function()
+                    local loadedName = C_Item.GetItemInfo(containerData.containerID)
+                    if loadedName then hName:SetText(loadedName) end
+                end)
+            end
+            
+            -- Opened count
+            local hCount = header:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+            hCount:SetPoint("LEFT", hIcon, "RIGHT", 10, -8)
+            hCount:SetText(format(ACO:Translate("LOOT_OPENED_COUNT"), containerData.opened))
+            hCount:SetTextColor(c.accent.r, c.accent.g, c.accent.b)
+            
+            -- Gold total (right side)
+            if containerData.gold > 0 then
+                local hGold = header:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+                hGold:SetPoint("TOPRIGHT", -10, -8)
+                hGold:SetText(format(ACO:Translate("LOOT_GOLD_TOTAL"), ACO:FormatMoney(containerData.gold)))
+                
+                local hGoldAvg = header:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+                hGoldAvg:SetPoint("BOTTOMRIGHT", -10, 8)
+                local avgGold = floor(containerData.gold / max(1, containerData.opened))
+                hGoldAvg:SetText(format(ACO:Translate("LOOT_GOLD_AVG"), ACO:FormatMoneyShort(avgGold)))
+                hGoldAvg:SetTextColor(c.textDim.r, c.textDim.g, c.textDim.b)
+            end
+            
+            -- Click to toggle + tooltip on header
+            header:EnableMouse(true)
+            header:SetScript("OnMouseDown", function()
+                self.lootExpandedContainers[cid] = not self.lootExpandedContainers[cid]
+                self:RefreshLootSummary()
+            end)
+            header:SetScript("OnEnter", function(self)
+                self:SetBackdropColor(c.primary.r * 0.25, c.primary.g * 0.25, c.primary.b * 0.25, 1)
+                GameTooltip:SetOwner(self, "ANCHOR_CURSOR")
+                GameTooltip:SetHyperlink("item:" .. containerData.containerID)
+                GameTooltip:Show()
+            end)
+            header:SetScript("OnLeave", function(self)
+                self:SetBackdropColor(c.primary.r * 0.15, c.primary.g * 0.15, c.primary.b * 0.15, 1)
+                GameTooltip:Hide()
+            end)
+            
+            yOffset = yOffset + 52
+            
+            -- Only show children when expanded
+            if isExpanded then
+                -- ============================================================
+                -- Loot item rows
+                -- ============================================================
+                for _, lootItem in ipairs(containerData.items) do
+                    local row = CreateFrame("Frame", nil, LootScrollChild, "BackdropTemplate")
+                    row:SetSize(scrollWidth, 30)
+                    row:SetPoint("TOPLEFT", 0, -yOffset)
+                    row:SetBackdrop(CardBackdrop)
+                    row:SetBackdropColor(0.06, 0.06, 0.09, 0.8)
+                    row:SetBackdropBorderColor(c.primary.r * 0.15, c.primary.g * 0.15, c.primary.b * 0.15, 0.4)
+                    tinsert(self.lootItems, row)
+                    
+                    local rIcon = row:CreateTexture(nil, "ARTWORK")
+                    rIcon:SetSize(20, 20)
+                    rIcon:SetPoint("LEFT", 30, 0)
+                    local lootIcon = C_Item.GetItemIconByID(lootItem.itemID)
+                    rIcon:SetTexture(lootIcon or "Interface\\Icons\\INV_Misc_QuestionMark")
+                    
+                    local rName = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+                    rName:SetPoint("LEFT", rIcon, "RIGHT", 8, 0)
+                    rName:SetWidth(220)
+                    rName:SetJustifyH("LEFT")
+                    
+                    local lootName = C_Item.GetItemInfo(lootItem.itemID)
+                    if lootName then
+                        rName:SetText(lootName)
+                    else
+                        rName:SetText("|cff888888...|r")
+                        local itemObj = Item:CreateFromItemID(lootItem.itemID)
+                        itemObj:ContinueOnItemLoad(function()
+                            local loadedName = C_Item.GetItemInfo(lootItem.itemID)
+                            if loadedName then rName:SetText(loadedName) end
+                        end)
+                    end
+                    
+                    -- Total count
+                    local rCount = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+                    rCount:SetPoint("RIGHT", -90, 0)
+                    rCount:SetText("x" .. lootItem.count)
+                    rCount:SetTextColor(c.success.r, c.success.g, c.success.b)
+                    
+                    -- Average per opening
+                    local rAvg = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+                    rAvg:SetPoint("RIGHT", -10, 0)
+                    local avg = lootItem.count / max(1, containerData.opened)
+                    rAvg:SetText(format(ACO:Translate("LOOT_AVG_PER_OPEN"), avg))
+                    rAvg:SetTextColor(c.textDim.r, c.textDim.g, c.textDim.b)
+                    
+                    -- Tooltip (use stored hyperlink for correct ilvl/upgrades, fallback to base itemID)
+                    row:EnableMouse(true)
+                    local tooltipLink = lootItem.link or ("item:" .. lootItem.itemID)
+                    row:SetScript("OnEnter", function(self)
+                        self:SetBackdropColor(0.10, 0.10, 0.15, 1)
+                        GameTooltip:SetOwner(self, "ANCHOR_CURSOR")
+                        GameTooltip:SetHyperlink(tooltipLink)
+                        GameTooltip:Show()
+                    end)
+                    row:SetScript("OnLeave", function(self)
+                        self:SetBackdropColor(0.06, 0.06, 0.09, 0.8)
+                        GameTooltip:Hide()
+                    end)
+                    
+                    yOffset = yOffset + 33
+                end
+                
+                -- ============================================================
+                -- Currency rows
+                -- ============================================================
+                for _, currData in ipairs(containerData.currencies) do
+                    local row = CreateFrame("Frame", nil, LootScrollChild, "BackdropTemplate")
+                    row:SetSize(scrollWidth, 30)
+                    row:SetPoint("TOPLEFT", 0, -yOffset)
+                    row:SetBackdrop(CardBackdrop)
+                    row:SetBackdropColor(0.08, 0.06, 0.12, 0.8)
+                    row:SetBackdropBorderColor(c.secondary.r * 0.2, c.secondary.g * 0.2, c.secondary.b * 0.2, 0.4)
+                    tinsert(self.lootItems, row)
+                    
+                    local cIcon = row:CreateTexture(nil, "ARTWORK")
+                    cIcon:SetSize(20, 20)
+                    cIcon:SetPoint("LEFT", 30, 0)
+                    
+                    local cName = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+                    cName:SetPoint("LEFT", cIcon, "RIGHT", 8, 0)
+                    cName:SetWidth(220)
+                    cName:SetJustifyH("LEFT")
+                    
+                    -- Get currency info
+                    local currInfo = C_CurrencyInfo and C_CurrencyInfo.GetCurrencyInfo(currData.currencyID)
+                    if currInfo then
+                        cName:SetText(currInfo.name or ("Currency " .. currData.currencyID))
+                        cIcon:SetTexture(currInfo.iconFileID or "Interface\\Icons\\INV_Misc_QuestionMark")
+                    else
+                        cName:SetText("Currency #" .. currData.currencyID)
+                        cIcon:SetTexture("Interface\\Icons\\INV_Misc_Coin_01")
+                    end
+                    
+                    -- Total count
+                    local cCount = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+                    cCount:SetPoint("RIGHT", -90, 0)
+                    cCount:SetText("x" .. currData.count)
+                    cCount:SetTextColor(c.secondary.r, c.secondary.g, c.secondary.b)
+                    
+                    -- Average per opening
+                    local cAvg = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+                    cAvg:SetPoint("RIGHT", -10, 0)
+                    local avg = currData.count / max(1, containerData.opened)
+                    cAvg:SetText(format(ACO:Translate("LOOT_AVG_PER_OPEN"), avg))
+                    cAvg:SetTextColor(c.textDim.r, c.textDim.g, c.textDim.b)
+                    
+                    yOffset = yOffset + 33
+                end
+            end -- end isExpanded
+            
+            -- Spacing between containers
+            yOffset = yOffset + 8
+        end
+        
+        LootScrollChild:SetHeight(max(1, yOffset))
+    end
+    
+    -- ========================================================================
     -- CONFIRMATION POPUPS
     -- ========================================================================
     
@@ -1595,6 +1913,19 @@ end
         button2 = ACO:Translate("POPUP_NO"),
         OnAccept = function()
             ACO:RemoveAllContainers()
+        end,
+        timeout = 0,
+        whileDead = true,
+        hideOnEscape = true,
+        preferredIndex = 3,
+    }
+    
+    StaticPopupDialogs["ACO_CLEAR_LOOT"] = {
+        text = ACO:Translate("POPUP_CLEAR_LOOT_TEXT"),
+        button1 = ACO:Translate("POPUP_YES"),
+        button2 = ACO:Translate("POPUP_NO"),
+        OnAccept = function()
+            ACO:ClearLootSummary()
         end,
         timeout = 0,
         whileDead = true,

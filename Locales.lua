@@ -138,6 +138,25 @@ L["enUS"] = {
     QUEUE_RESUME = "Resume",
     -- Open failure after retries
     OPEN_FAILED_RETRY = "%s could not be opened after 3 attempts (server may require manual interaction).",
+    -- Loot summary tab
+    TAB_LOOT = "Loot",
+    LOOT_TITLE = "Loot Summary",
+    LOOT_HINT = "Detailed breakdown of loot received from each container type.",
+    LOOT_OPENED_COUNT = "Opened %dx",
+    LOOT_GOLD_TOTAL = "Gold: %s",
+    LOOT_GOLD_AVG = "(avg %s/open)",
+    LOOT_ITEMS_HEADER = "Items received:",
+    LOOT_CURRENCIES_HEADER = "Currencies:",
+    LOOT_EMPTY = "|cff666666No loot data recorded yet.|r",
+    LOOT_SUMMARY_CLEARED = "Loot summary cleared.",
+    LOOT_AVG_PER_OPEN = "avg %.1f/open",
+    CLEAR_LOOT_BTN = "Reset",
+    POPUP_CLEAR_LOOT_TEXT = "Are you sure you want to reset all loot data?",
+    EXPORT_CSV_BTN = "CSV",
+    EXPORT_JSON_BTN = "JSON",
+    EXPORT_LOOT_EMPTY = "No loot data to export.",
+    EXPORT_LOOT_CSV_TITLE = "Export Loot (CSV)",
+    EXPORT_LOOT_JSON_TITLE = "Export Loot (JSON)",
 }
 
 L["frFR"] = {
@@ -273,6 +292,25 @@ L["frFR"] = {
     QUEUE_RESUME = "Reprendre",
     -- Échec d'ouverture après plusieurs essais
     OPEN_FAILED_RETRY = "%s n'a pas pu être ouvert après 3 tentatives (interaction manuelle peut-être requise).",
+    -- Onglet Butin
+    TAB_LOOT = "Butin",
+    LOOT_TITLE = "Résumé du butin",
+    LOOT_HINT = "Détail du butin reçu pour chaque type de conteneur.",
+    LOOT_OPENED_COUNT = "Ouvert %dx",
+    LOOT_GOLD_TOTAL = "Or : %s",
+    LOOT_GOLD_AVG = "(moy %s/ouv.)",
+    LOOT_ITEMS_HEADER = "Objets reçus :",
+    LOOT_CURRENCIES_HEADER = "Monnaies :",
+    LOOT_EMPTY = "|cff666666Aucun butin enregistré pour le moment.|r",
+    LOOT_SUMMARY_CLEARED = "Résumé du butin réinitialisé.",
+    LOOT_AVG_PER_OPEN = "moy %.1f/ouv.",
+    CLEAR_LOOT_BTN = "Réinitialiser",
+    POPUP_CLEAR_LOOT_TEXT = "Voulez-vous réinitialiser toutes les données de butin ?",
+    EXPORT_CSV_BTN = "CSV",
+    EXPORT_JSON_BTN = "JSON",
+    EXPORT_LOOT_EMPTY = "Aucune donnée de butin à exporter.",
+    EXPORT_LOOT_CSV_TITLE = "Export du butin (CSV)",
+    EXPORT_LOOT_JSON_TITLE = "Export du butin (JSON)",
 }
 
 -- Fallback to enUS for missing keys

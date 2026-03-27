@@ -56,6 +56,7 @@ ACO.goldTracker = {
     pendingItemID = nil,
 }
 ACO.goldTrackerQueue = {}  -- queue-based gold tracking for batch openings
+ACO.lootTrackerQueue = {}  -- queue-based loot tracking for content capture
 
 -- Centralized open queue worker
 ACO.openQueue = {}
@@ -258,6 +259,8 @@ local defaults = {
     -- History (last 50 openings)
     history = {},
     historyMaxSize = 50,
+    -- Loot summary per container type
+    lootSummary = {},  -- [containerItemID] = { opened=N, gold=copper, items={[itemID]=count}, currencies={[currencyID]=count} }
 }
 
 -- ============================================================================
@@ -788,6 +791,9 @@ function ACO:UseContainerFromBagSlot(itemID, bag, slot, itemLink)
         itemName = info.hyperlink:match("%[(.-)%]")
     end
     self:NotifyZarctusGold(itemID, itemName)
+
+    -- Snapshot bags BEFORE using the item (for loot tracking)
+    self:StartLootTracking(itemID)
 
     C_Container.UseContainerItem(bag, slot)
     self:RecordOpening(itemID)
@@ -1419,6 +1425,222 @@ function ACO:CleanupGoldTrackers()
     wipe(queue)
 end
 
+-- ============================================================================
+-- LOOT TRACKING (captures items, gold, currencies from container openings)
+-- ============================================================================
+
+-- Take a full bag item snapshot (itemID -> {count, link}) across all tracked bags
+function ACO:TakeBagItemSnapshot()
+    local snapshot = {}  -- [itemID] = { count=N, link="..." }
+    for _, bag in ipairs(self:GetTrackedBags()) do
+        local numSlots = C_Container.GetContainerNumSlots(bag) or 0
+        for slot = 1, numSlots do
+            local info = C_Container.GetContainerItemInfo(bag, slot)
+            if info and info.itemID then
+                local id = info.itemID
+                local qty = info.stackCount or 1
+                if snapshot[id] then
+                    snapshot[id].count = snapshot[id].count + qty
+                else
+                    snapshot[id] = { count = qty, link = info.hyperlink }
+                end
+            end
+        end
+    end
+    return snapshot
+end
+
+-- Called right BEFORE UseContainerItem to snapshot the current state.
+function ACO:StartLootTracking(containerItemID)
+    if not self.db then return end
+
+    -- Process any already-pending trackers whose loot may have arrived
+    self:ProcessLootTrackers()
+
+    local tracker = {
+        containerItemID = containerItemID,
+        bagSnapshot     = self:TakeBagItemSnapshot(),
+        goldBefore      = GetMoney(),
+        currencies      = {},  -- filled by CHAT_MSG_CURRENCY
+        timestamp       = GetTime(),
+        resolved        = false,
+    }
+    tinsert(self.lootTrackerQueue, tracker)
+
+    -- Schedule delayed processing (must wait for server to send bag updates)
+    local selfRef = self
+    C_Timer.After(1.5, function() selfRef:ProcessLootTrackers() end)
+    C_Timer.After(3.0, function() selfRef:ProcessLootTrackers() end)
+    C_Timer.After(6.0, function() selfRef:CleanupLootTrackers() end)
+end
+
+function ACO:ProcessLootTrackers()
+    local queue = self.lootTrackerQueue
+    local i = 1
+    while i <= #queue do
+        if queue[i].resolved then
+            tremove(queue, i)
+        else
+            -- Boundary: use next tracker's snapshot/gold, or current state for the last one
+            local afterSnapshot, goldAfter
+            if queue[i + 1] then
+                afterSnapshot = queue[i + 1].bagSnapshot
+                goldAfter     = queue[i + 1].goldBefore
+            else
+                afterSnapshot = self:TakeBagItemSnapshot()
+                goldAfter     = GetMoney()
+            end
+
+            -- Diff items: find what was gained
+            local gained = {}  -- [itemID] = { count=N, link="..." }
+            for itemID, newData in pairs(afterSnapshot) do
+                local oldCount = 0
+                if queue[i].bagSnapshot[itemID] then
+                    oldCount = queue[i].bagSnapshot[itemID].count or 0
+                end
+                local newCount = newData.count or 0
+                if newCount > oldCount then
+                    -- Exclude the container itself (it was consumed)
+                    if itemID ~= queue[i].containerItemID then
+                        gained[itemID] = { count = newCount - oldCount, link = newData.link }
+                    end
+                end
+            end
+
+            -- Gold diff
+            local goldGained = goldAfter - queue[i].goldBefore
+            if goldGained < 0 then goldGained = 0 end
+
+            -- Finalize when we have data or enough time has passed
+            local elapsed = GetTime() - queue[i].timestamp
+            if next(gained) or goldGained > 0 or next(queue[i].currencies) or elapsed > 2.5 then
+                self:FinalizeLootTracker(queue[i], gained, goldGained)
+                tremove(queue, i)
+            else
+                i = i + 1
+            end
+        end
+    end
+end
+
+function ACO:FinalizeLootTracker(tracker, gained, goldGained)
+    if tracker.resolved then return end
+    tracker.resolved = true
+    if not self.db then return end
+
+    local containerID = tracker.containerItemID
+    local summary = self.db.lootSummary
+
+    if not summary[containerID] then
+        summary[containerID] = {
+            opened     = 0,
+            gold       = 0,
+            items      = {},
+            currencies = {},
+        }
+    end
+
+    local entry = summary[containerID]
+    entry.opened = (entry.opened or 0) + 1
+    entry.gold   = (entry.gold or 0) + goldGained
+
+    -- Merge gained items
+    for itemID, data in pairs(gained) do
+        if not entry.items[itemID] then
+            entry.items[itemID] = { count = 0 }
+        end
+        local it = entry.items[itemID]
+        -- Support legacy format (plain number)
+        if type(it) == "number" then
+            it = { count = it }
+            entry.items[itemID] = it
+        end
+        it.count = (it.count or 0) + (data.count or data)
+        -- Always keep the latest hyperlink (most up-to-date modifiers)
+        if type(data) == "table" and data.link then
+            it.link = data.link
+        end
+    end
+
+    -- Merge currencies
+    for currencyID, count in pairs(tracker.currencies) do
+        entry.currencies[currencyID] = (entry.currencies[currencyID] or 0) + count
+    end
+
+    self:Debug(format("Loot tracked for container %d: %d item(s), %s gold, %d currency type(s)",
+        containerID,
+        self:CountTable(gained),
+        self:FormatMoneyShort(goldGained),
+        self:CountTable(tracker.currencies)))
+
+    if self.UI and self.UI.RefreshLootSummary then
+        self.UI:RefreshLootSummary()
+    end
+end
+
+function ACO:CleanupLootTrackers()
+    self:ProcessLootTrackers()
+    -- Finalize any remaining unresolved trackers (containers that gave nothing visible)
+    local queue = self.lootTrackerQueue
+    for i = #queue, 1, -1 do
+        if not queue[i].resolved then
+            self:FinalizeLootTracker(queue[i], {}, 0)
+        end
+    end
+    wipe(queue)
+end
+
+-- Get formatted loot summary for UI (sorted by opened count desc)
+function ACO:GetLootSummary()
+    local result = {}
+    if not self.db or not self.db.lootSummary then return result end
+
+    for containerID, data in pairs(self.db.lootSummary) do
+        local entry = {
+            containerID = containerID,
+            opened      = data.opened or 0,
+            gold        = data.gold or 0,
+            items       = {},
+            currencies  = {},
+        }
+
+        -- Build sorted items list
+        for itemID, itemData in pairs(data.items or {}) do
+            -- Support legacy format (plain number) and new format ({count=, link=})
+            local count, link
+            if type(itemData) == "number" then
+                count = itemData
+                link = nil
+            else
+                count = itemData.count or 0
+                link = itemData.link
+            end
+            tinsert(entry.items, { itemID = itemID, count = count, link = link })
+        end
+        table.sort(entry.items, function(a, b) return a.count > b.count end)
+
+        -- Build sorted currencies list
+        for currencyID, count in pairs(data.currencies or {}) do
+            tinsert(entry.currencies, { currencyID = currencyID, count = count })
+        end
+        table.sort(entry.currencies, function(a, b) return a.count > b.count end)
+
+        tinsert(result, entry)
+    end
+
+    table.sort(result, function(a, b) return a.opened > b.opened end)
+    return result
+end
+
+function ACO:ClearLootSummary()
+    if not self.db then return end
+    wipe(self.db.lootSummary)
+    self:Print(ACO:Translate("LOOT_SUMMARY_CLEARED"))
+    if self.UI and self.UI.RefreshLootSummary then
+        self.UI:RefreshLootSummary()
+    end
+end
+
 -- Format money (copper) to gold/silver/copper string
 function ACO:FormatMoney(copper)
     if not copper or copper == 0 then return "0" end
@@ -1596,6 +1818,11 @@ function ACO:ClearHistory()
     end
 end
 
+-- Clear loot summary
+function ACO:ClearLootSummaryData()
+    self:ClearLootSummary()
+end
+
 -- ============================================================================
 -- AUTO-DISCOVERY HOOK (Feature: detect containers on manual use)
 -- ============================================================================
@@ -1605,59 +1832,80 @@ function ACO:SetupAutoDiscoveryHook()
     self._autoDiscoveryHooked = true
     self._discoveredItems = {}
 
+    -- IMPORTANT: The hooksecurefunc callback runs inside the SAME secure call
+    -- stack as the ContainerFrameItemButton OnClick.  Any insecure work done
+    -- here (tooltip scanning, table writes, sound playback, queue management)
+    -- taints the entire call chain and, over time, makes bag buttons stop
+    -- responding to clicks.
+    --
+    -- Fix: capture only the minimal data we need (bag, slot, itemID, hyperlink)
+    -- and defer ALL processing to the NEXT frame via C_Timer.After(0, ...).
+    -- This breaks the taint chain because the deferred callback runs in its
+    -- own independent (insecure) execution path.
     hooksecurefunc(C_Container, "UseContainerItem", function(bag, slot)
         if not ACO.db or not ACO.db.enabled then return end
         if not ACO.db.autoDiscovery then return end
 
+        -- Capture info NOW (the item may be gone by the time the timer fires)
         local info = C_Container.GetContainerItemInfo(bag, slot)
         if not info or not info.itemID then return end
 
-        local itemID = info.itemID
+        local itemID   = info.itemID
+        local hyperlink = info.hyperlink
 
-        -- Already tracked or blacklisted? Skip
+        -- Quick early-outs that don't touch any addon state
         if ACO.db.containers[itemID] then return end
         if ACO.db.blacklist and ACO.db.blacklist[itemID] then return end
+        if ACO._discoveredItems and ACO._discoveredItems[itemID] then return end
 
-        -- Already discovered this session? Skip (avoid spam)
-        if ACO._discoveredItems[itemID] then return end
-
-        -- Exclude equippable items / real bags
-        if C_Item.GetItemInfoInstant then
-            local _, _, _, eqLoc, _, classID = C_Item.GetItemInfoInstant(itemID)
-            if eqLoc and eqLoc ~= "" and eqLoc ~= "INVTYPE_NON_EQUIP" then return end
-            if classID == 1 or classID == 11 then return end
-        end
-
-        -- Use IsContainerItem which has all the improved detection logic
-        -- (invalidate cache first so it's checked fresh)
-        ACO.containerCache[itemID] = nil
-        local isContainer = ACO:IsContainerItem(itemID)
-
-        if isContainer then
-            ACO._discoveredItems[itemID] = true
-            -- Add to tracked list silently (we print our own message)
-            ACO.db.containers[itemID] = true
-            ACO.containerCache[itemID] = nil
-
-            local link = info.hyperlink or ACO:FormatItemLink(itemID)
-            ACO:Print(format(ACO:Translate("AUTO_DISCOVER_PROMPT"), link, itemID))
-
-            if ACO.db.notificationSound then
-                PlaySound(ACO.SOUNDS.ADD)
-            end
-
-            if ACO.UI and ACO.UI.RefreshList then
-                ACO.UI:RefreshList()
-            end
-
-            -- Queue any remaining copies already in bags (this fires AFTER the manual
-            -- UseContainerItem call, so the item being opened will be gone from its
-            -- slot by the time the queue worker runs; extra entries are silently dropped).
-            if ACO.db.enabled then
-                ACO:QueueExistingContainers(itemID)
-            end
-        end
+        -- Defer everything else to break the secure call-chain
+        C_Timer.After(0, function()
+            ACO:ProcessAutoDiscovery(itemID, hyperlink)
+        end)
     end)
+end
+
+-- Deferred auto-discovery processing (runs outside the secure call stack)
+function ACO:ProcessAutoDiscovery(itemID, hyperlink)
+    if not self.db or not self.db.enabled then return end
+    if not self.db.autoDiscovery then return end
+
+    -- Re-check (state may have changed between capture and now)
+    if self.db.containers[itemID] then return end
+    if self.db.blacklist and self.db.blacklist[itemID] then return end
+    if self._discoveredItems[itemID] then return end
+
+    -- Exclude equippable items / real bags
+    if C_Item.GetItemInfoInstant then
+        local _, _, _, eqLoc, _, classID = C_Item.GetItemInfoInstant(itemID)
+        if eqLoc and eqLoc ~= "" and eqLoc ~= "INVTYPE_NON_EQUIP" then return end
+        if classID == 1 or classID == 11 then return end
+    end
+
+    -- Use IsContainerItem which has all the improved detection logic
+    self.containerCache[itemID] = nil
+    local isContainer = self:IsContainerItem(itemID)
+
+    if isContainer then
+        self._discoveredItems[itemID] = true
+        self.db.containers[itemID] = true
+        self.containerCache[itemID] = nil
+
+        local link = hyperlink or self:FormatItemLink(itemID)
+        self:Print(format(ACO:Translate("AUTO_DISCOVER_PROMPT"), link, itemID))
+
+        if self.db.notificationSound then
+            PlaySound(self.SOUNDS.ADD)
+        end
+
+        if self.UI and self.UI.RefreshList then
+            self.UI:RefreshList()
+        end
+
+        if self.db.enabled then
+            self:QueueExistingContainers(itemID)
+        end
+    end
 end
 
 -- ============================================================================
@@ -1828,6 +2076,28 @@ events["SCRAPPING_MACHINE_SHOW"] = function(self)
 end
 events["SCRAPPING_MACHINE_CLOSE"] = function(self)
     ACO:SetBlocker("scrapping", false)
+end
+
+-- Currency tracking (captures currency gains during loot tracker window)
+events["CHAT_MSG_CURRENCY"] = function(self, msg)
+    if #ACO.lootTrackerQueue == 0 then return end
+    if not msg then return end
+
+    -- Parse currency ID from hyperlink: |Hcurrency:XXXX:0|h
+    local currencyIDStr = msg:match("|Hcurrency:(%d+)")
+    if not currencyIDStr then return end
+    local currencyID = tonumber(currencyIDStr)
+    if not currencyID then return end
+
+    -- Parse count: "x5" at the end, or 1 if absent
+    local count = tonumber(msg:match("x(%d+)")) or 1
+
+    -- Attribute to the most recent unresolved tracker
+    local latest = ACO.lootTrackerQueue[#ACO.lootTrackerQueue]
+    if latest and not latest.resolved then
+        latest.currencies[currencyID] = (latest.currencies[currencyID] or 0) + count
+        ACO:Debug(format("Currency captured: %d x%d", currencyID, count))
+    end
 end
 
 -- ============================================================================
@@ -2261,6 +2531,100 @@ function ACO:ImportContainers(importString, clearExisting)
     return count
 end
 
+-- ========================================================================
+-- LOOT EXPORT (CSV / JSON)
+-- ========================================================================
+
+function ACO:ExportLootCSV()
+    local lootData = self:GetLootSummary()
+    if #lootData == 0 then return "" end
+    
+    local lines = {}
+    tinsert(lines, "container_id,container_name,opened,gold_copper,item_id,item_name,item_count,avg_per_open,type")
+    
+    for _, cd in ipairs(lootData) do
+        local cName = C_Item.GetItemInfo(cd.containerID) or ("Item " .. cd.containerID)
+        cName = cName:gsub('"', '""')
+        
+        if cd.gold > 0 then
+            local avgGold = floor(cd.gold / max(1, cd.opened))
+            tinsert(lines, format('"%d","%s","%d","%d","","gold","%d","%d","gold"',
+                cd.containerID, cName, cd.opened, cd.gold, cd.gold, avgGold))
+        end
+        
+        for _, it in ipairs(cd.items) do
+            local iName = C_Item.GetItemInfo(it.itemID) or ("Item " .. it.itemID)
+            iName = iName:gsub('"', '""')
+            local avg = it.count / max(1, cd.opened)
+            tinsert(lines, format('"%d","%s","%d","","%d","%s","%d","%.2f","item"',
+                cd.containerID, cName, cd.opened, it.itemID, iName, it.count, avg))
+        end
+        
+        for _, cu in ipairs(cd.currencies) do
+            local cuName
+            local currInfo = C_CurrencyInfo and C_CurrencyInfo.GetCurrencyInfo(cu.currencyID)
+            cuName = currInfo and currInfo.name or ("Currency " .. cu.currencyID)
+            cuName = cuName:gsub('"', '""')
+            local avg = cu.count / max(1, cd.opened)
+            tinsert(lines, format('"%d","%s","%d","","%d","%s","%d","%.2f","currency"',
+                cd.containerID, cName, cd.opened, cu.currencyID, cuName, cu.count, avg))
+        end
+    end
+    
+    return table.concat(lines, "\n")
+end
+
+function ACO:ExportLootJSON()
+    local lootData = self:GetLootSummary()
+    if #lootData == 0 then return "[]" end
+    
+    local function jsonStr(s)
+        s = tostring(s):gsub('\\', '\\\\'):gsub('"', '\\"'):gsub('\n', '\\n')
+        return '"' .. s .. '"'
+    end
+    
+    local containers = {}
+    for _, cd in ipairs(lootData) do
+        local cName = C_Item.GetItemInfo(cd.containerID) or ("Item " .. cd.containerID)
+        local items = {}
+        for _, it in ipairs(cd.items) do
+            local iName = C_Item.GetItemInfo(it.itemID) or ("Item " .. it.itemID)
+            local avg = it.count / max(1, cd.opened)
+            tinsert(items, format('{"itemID":%d,"name":%s,"count":%d,"avgPerOpen":%.2f}',
+                it.itemID, jsonStr(iName), it.count, avg))
+        end
+        local currencies = {}
+        for _, cu in ipairs(cd.currencies) do
+            local cuName
+            local currInfo = C_CurrencyInfo and C_CurrencyInfo.GetCurrencyInfo(cu.currencyID)
+            cuName = currInfo and currInfo.name or ("Currency " .. cu.currencyID)
+            local avg = cu.count / max(1, cd.opened)
+            tinsert(currencies, format('{"currencyID":%d,"name":%s,"count":%d,"avgPerOpen":%.2f}',
+                cu.currencyID, jsonStr(cuName), cu.count, avg))
+        end
+        local avgGold = floor(cd.gold / max(1, cd.opened))
+        tinsert(containers, format('{"containerID":%d,"name":%s,"opened":%d,"goldCopper":%d,"avgGoldCopper":%d,"items":[%s],"currencies":[%s]}',
+            cd.containerID, jsonStr(cName), cd.opened, cd.gold, avgGold,
+            table.concat(items, ","), table.concat(currencies, ",")))
+    end
+    
+    return "[" .. table.concat(containers, ",") .. "]"
+end
+
+function ACO:ShowLootExportFrame(text, titleKey)
+    if not self.ExportFrame then
+        self:CreateImportExportFrame()
+    end
+    self.ExportFrame.editBox:SetText(text)
+    self.ExportFrame.title:SetText("|cff00ccff" .. ACO:Translate(titleKey) .. "|r")
+    self.ExportFrame.importBtn:Hide()
+    self.ExportFrame.clearImportBtn:Hide()
+    self.ExportFrame.helpText:Hide()
+    self.ExportFrame:Show()
+    self.ExportFrame.editBox:HighlightText()
+    self.ExportFrame.editBox:SetFocus()
+end
+
 function ACO:CreateImportExportFrame()
     local c = self.colors
     
@@ -2348,10 +2712,10 @@ function ACO:CreateImportExportFrame()
         C_Timer.After(0.05, UpdateEditBoxWidth)
     end)
 
-    -- Close button
-    local closeBtn = CreateFrame("Button", nil, frame)
+    -- Close button (parented to titleBar so it stays above it)
+    local closeBtn = CreateFrame("Button", nil, titleBar)
     closeBtn:SetSize(24, 24)
-    closeBtn:SetPoint("TOPRIGHT", -8, -8)
+    closeBtn:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -8, -8)
     local closeTex = closeBtn:CreateTexture(nil, "ARTWORK")
     closeTex:SetAllPoints()
     closeTex:SetAtlas("common-icon-redx")
