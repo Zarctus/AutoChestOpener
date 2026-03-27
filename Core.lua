@@ -974,6 +974,42 @@ function ACO:ProcessQueueTick()
             self.batchTracker.count = self.batchTracker.count + 1
         end
         self.queueNextAllowedAt = now + (self.queueOpenInterval or 0.25)
+
+        -- Post-use verification: C_Container.UseContainerItem is fire-and-forget.
+        -- The server can silently reject the call (GCD active, player is casting,
+        -- server-side item restrictions, etc.) without any Lua error.
+        -- 1.5s after the call, check whether the item is still in bags.
+        -- If it is, the use failed → re-queue up to 2 more times before giving up.
+        local verifyRound = entry.verifyRound or 0
+        local selfRef    = self
+        local verifyID   = entry.itemID
+        local verifyLink = entry.link
+        C_Timer.After(1.5, function()
+            if not selfRef.db or not selfRef.db.enabled then return end
+            local fb, fs, fi = selfRef:FindItemInBags(verifyID)
+            if not fb then return end  -- item was consumed – all good
+
+            if verifyRound < 2 then
+                -- Still present: queue another attempt
+                selfRef:Debug(format("Item %d toujours en sac après UseContainerItem (vérification %d) – nouvel essai", verifyID, verifyRound + 1))
+                local retryEntry = {
+                    itemID      = verifyID,
+                    bag         = fb,
+                    slot        = fs,
+                    link        = (fi and fi.hyperlink) or verifyLink,
+                    executeAt   = GetTime() + 0.5,
+                    source      = "RETRY",
+                    tries       = 0,
+                    verifyRound = verifyRound + 1,
+                }
+                selfRef:InsertOpenQueueEntry(retryEntry)
+                selfRef:StartQueueWorker()
+            else
+                -- All retries exhausted and item is still present.
+                local ilink = (fi and fi.hyperlink) or selfRef:FormatItemLink(verifyID)
+                selfRef:Print(ACO:Translate("OPEN_FAILED_RETRY", ilink), true)
+            end
+        end)
         return
     end
 
@@ -1613,6 +1649,13 @@ function ACO:SetupAutoDiscoveryHook()
             if ACO.UI and ACO.UI.RefreshList then
                 ACO.UI:RefreshList()
             end
+
+            -- Queue any remaining copies already in bags (this fires AFTER the manual
+            -- UseContainerItem call, so the item being opened will be gone from its
+            -- slot by the time the queue worker runs; extra entries are silently dropped).
+            if ACO.db.enabled then
+                ACO:QueueExistingContainers(itemID)
+            end
         end
     end)
 end
@@ -1667,6 +1710,15 @@ events["PLAYER_ENTERING_WORLD"] = function(self, isInitialLogin, isReloadingUi)
             ACO:InitializeBagState()
             ACO.bagStateInitialized = true
             ACO:Debug("État des sacs prêt - détection des nouveaux items activée")
+
+            -- Queue any containers already present in bags at startup/reload.
+            -- InitializeBagState only snapshots the current state; without this,
+            -- items that were in bags before login (or across a /reload) are never opened.
+            if ACO.db.enabled then
+                for itemID in pairs(ACO.db.containers) do
+                    ACO:QueueExistingContainers(itemID)
+                end
+            end
         end
     end)
 end

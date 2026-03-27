@@ -136,6 +136,8 @@ L["enUS"] = {
     QUEUE_CANCEL = "Cancel",
     QUEUE_PAUSE = "Pause",
     QUEUE_RESUME = "Resume",
+    -- Open failure after retries
+    OPEN_FAILED_RETRY = "%s could not be opened after 3 attempts (server may require manual interaction).",
 }
 
 L["frFR"] = {
@@ -269,6 +271,8 @@ L["frFR"] = {
     QUEUE_CANCEL = "Annuler",
     QUEUE_PAUSE = "Pause",
     QUEUE_RESUME = "Reprendre",
+    -- Échec d'ouverture après plusieurs essais
+    OPEN_FAILED_RETRY = "%s n'a pas pu être ouvert après 3 tentatives (interaction manuelle peut-être requise).",
 }
 
 -- Fallback to enUS for missing keys
