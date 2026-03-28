@@ -268,15 +268,29 @@ local defaults = {
 -- ============================================================================
 
 ACO.colors = {
-    primary = { r = 0.00, g = 0.80, b = 1.00 },     -- Cyan
-    secondary = { r = 0.60, g = 0.40, b = 1.00 },   -- Purple
-    accent = { r = 1.00, g = 0.80, b = 0.00 },      -- Gold
-    success = { r = 0.00, g = 1.00, b = 0.50 },     -- Green
-    error = { r = 1.00, g = 0.30, b = 0.30 },       -- Red
-    text = { r = 0.90, g = 0.90, b = 0.90 },        -- Light grey
-    textDim = { r = 0.60, g = 0.60, b = 0.60 },     -- Dim grey
-    background = { r = 0.05, g = 0.05, b = 0.10 },  -- Dark blue-black
-    backgroundLight = { r = 0.10, g = 0.10, b = 0.15 },
+    -- Palette Midnight unifiée (Zayu / Zarctus)
+    bg          = { r = 0.06, g = 0.06, b = 0.08, a = 0.97 },
+    header      = { r = 0.10, g = 0.10, b = 0.13, a = 1    },
+    row         = { r = 0.09, g = 0.09, b = 0.12, a = 0.92 },
+    rowAlt      = { r = 0.06, g = 0.06, b = 0.09, a = 0.92 },
+    rowHover    = { r = 0.14, g = 0.15, b = 0.22, a = 1    },
+    border      = { r = 0.22, g = 0.22, b = 0.28, a = 1    },
+    borderLight = { r = 0.35, g = 0.35, b = 0.40, a = 1    },
+    accent      = { r = 0.00, g = 0.70, b = 0.90, a = 1    },
+    gold        = { r = 1.00, g = 0.82, b = 0.00, a = 1    },
+    green       = { r = 0.30, g = 0.90, b = 0.30, a = 1    },
+    red         = { r = 1.00, g = 0.30, b = 0.30, a = 1    },
+    orange      = { r = 1.00, g = 0.60, b = 0.10, a = 1    },
+    text        = { r = 0.95, g = 0.95, b = 0.95, a = 1    },
+    textDim     = { r = 0.55, g = 0.55, b = 0.58, a = 1    },
+    textHeader  = { r = 0.75, g = 0.75, b = 0.78, a = 1    },
+    -- Rétrocompatibilité (Core.lua :Print, etc.)
+    primary         = { r = 0.00, g = 0.70, b = 0.90 },
+    secondary       = { r = 0.60, g = 0.40, b = 1.00 },
+    success         = { r = 0.30, g = 0.90, b = 0.30 },
+    error           = { r = 1.00, g = 0.30, b = 0.30 },
+    background      = { r = 0.06, g = 0.06, b = 0.08 },
+    backgroundLight = { r = 0.09, g = 0.09, b = 0.12 },
 }
 
 ACO.SOUNDS = {
@@ -1462,6 +1476,7 @@ function ACO:StartLootTracking(containerItemID)
         bagSnapshot     = self:TakeBagItemSnapshot(),
         goldBefore      = GetMoney(),
         currencies      = {},  -- filled by CHAT_MSG_CURRENCY
+        lootItems       = {},  -- filled by CHAT_MSG_LOOT
         timestamp       = GetTime(),
         resolved        = false,
     }
@@ -1559,6 +1574,15 @@ function ACO:FinalizeLootTracker(tracker, gained, goldGained)
         -- Always keep the latest hyperlink (most up-to-date modifiers)
         if type(data) == "table" and data.link then
             it.link = data.link
+        end
+    end
+
+    -- Merge items captured via CHAT_MSG_LOOT (fallback quand le diff de sac rate des items par timing)
+    if tracker.lootItems then
+        for itemID, data in pairs(tracker.lootItems) do
+            if not gained[itemID] then
+                gained[itemID] = { count = data.count, link = data.link }
+            end
         end
     end
 
@@ -2076,6 +2100,36 @@ events["SCRAPPING_MACHINE_SHOW"] = function(self)
 end
 events["SCRAPPING_MACHINE_CLOSE"] = function(self)
     ACO:SetBlocker("scrapping", false)
+end
+
+-- Item loot tracking (captures item gains during loot tracker window)
+events["CHAT_MSG_LOOT"] = function(self, msg)
+    if #ACO.lootTrackerQueue == 0 then return end
+    if not msg then return end
+
+    -- Parse item ID from hyperlink: |Hitem:XXXX:...|h
+    local itemIDStr = msg:match("|Hitem:(%d+)")
+    if not itemIDStr then return end
+    local itemID = tonumber(itemIDStr)
+    if not itemID then return end
+
+    -- Parse count: "x5" at the end, or 1 if absent
+    local count = tonumber(msg:match("x(%d+)")) or 1
+
+    -- Extract full hyperlink
+    local link = msg:match("|Hitem:[^|]+|h%[[^%]]+%]|h")
+
+    -- Attribute to the most recent unresolved tracker
+    local latest = ACO.lootTrackerQueue[#ACO.lootTrackerQueue]
+    if latest and not latest.resolved then
+        if not latest.lootItems then latest.lootItems = {} end
+        if not latest.lootItems[itemID] then
+            latest.lootItems[itemID] = { count = 0 }
+        end
+        latest.lootItems[itemID].count = latest.lootItems[itemID].count + count
+        if link then latest.lootItems[itemID].link = link end
+        ACO:Debug(format("Loot item captured via CHAT_MSG_LOOT: %d x%d", itemID, count))
+    end
 end
 
 -- Currency tracking (captures currency gains during loot tracker window)
