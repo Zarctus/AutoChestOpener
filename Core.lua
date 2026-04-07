@@ -1,7 +1,7 @@
 --[[
     Auto Chest Opener - Core Module
     Automatically opens all types of containers, chests, bags, crates, lockboxes, gifts and more
-    Version: 2.1.0
+    Version: 2.2.0
 ]]
 
 local addonName, ACO = ...
@@ -34,6 +34,18 @@ local strsplit = strsplit
 local GetMoney = GetMoney
 local UnitName = UnitName
 local Item = Item
+
+-- ============================================================================
+-- SECURE ACTION BUTTON (Midnight 12.0+ compatibility)
+-- UseContainerItem is now protected; we use SecureActionButtonTemplate
+-- with type="item" to open containers via a programmatic secure click.
+-- ============================================================================
+
+local secureBtn = CreateFrame("Button", "ACOSecureOpenButton", UIParent, "SecureActionButtonTemplate")
+secureBtn:SetSize(1, 1)
+secureBtn:SetPoint("TOPLEFT", UIParent, "TOPLEFT", -100, 100)
+secureBtn:Hide()
+secureBtn:RegisterForClicks("AnyUp", "AnyDown")
 
 -- ============================================================================
 -- ADDON INITIALIZATION
@@ -337,6 +349,15 @@ end
 
 -- Cache pour les items vérifiés (évite les vérifications répétées)
 ACO.containerCache = {}
+ACO.containerCacheSize = 0
+ACO.CONTAINER_CACHE_MAX = 500
+
+function ACO:PruneContainerCache()
+    if self.containerCacheSize <= self.CONTAINER_CACHE_MAX then return end
+    wipe(self.containerCache)
+    self.containerCacheSize = 0
+    self:Debug("Container cache pruned")
+end
 
 
 -- ============================================================================
@@ -499,6 +520,12 @@ local CONTAINER_NAME_KEYWORDS = {
     "jar", "jarre",
     "basket", "panier", "korb",
     "carton",
+    -- Midnight / The War Within S2+ containers
+    "voidstorm", "haranir", "sunwell", "silvermoon",
+    "amani", "zul'aman", "quel'thalas",
+    "nexus", "nightborne", "twilight",
+    "earthen", "arathi", "awakening",
+    "undermine", "venture",
 }
 
 -- ============================================================================
@@ -555,6 +582,24 @@ function ACO:HasOpenableTooltipModern(itemID)
             if normalized and ContainsAnyPlain(normalized, TOOLTIP_OPEN_KEYWORDS) then
                 return true
             end
+
+            -- 12.0+ TooltipDataLineType detection
+            -- FlavorText lines sometimes describe openable items
+            local lineType = lineData.type
+            if lineType then
+                -- Skip quality / requirement / error lines (not relevant for containers)
+                if lineType == Enum.TooltipDataLineType.ItemQuality
+                or lineType == Enum.TooltipDataLineType.UsageRequirement
+                or lineType == Enum.TooltipDataLineType.ErrorLine
+                or lineType == Enum.TooltipDataLineType.DisabledLine then
+                    -- These are never "open" instructions; skip them
+                elseif lineType == Enum.TooltipDataLineType.FlavorText then
+                    if normalized and (ContainsAnyPlain(normalized, OPEN_PATTERNS) or ContainsAnyPlain(normalized, OPEN_KEYWORDS)) then
+                        return true
+                    end
+                end
+            end
+
             -- Green "Use:" text lines (type 0, green color ~= {0, 1, 0})
             -- These indicate an active use effect
             if lineData.leftColor then
@@ -707,6 +752,8 @@ function ACO:IsContainerItem(itemID)
     end
 
     self.containerCache[itemID] = isContainer
+    self.containerCacheSize = (self.containerCacheSize or 0) + 1
+    self:PruneContainerCache()
     return isContainer
 end
 
@@ -809,7 +856,15 @@ function ACO:UseContainerFromBagSlot(itemID, bag, slot, itemLink)
     -- Snapshot bags BEFORE using the item (for loot tracking)
     self:StartLootTracking(itemID)
 
-    C_Container.UseContainerItem(bag, slot)
+    -- Try direct API first; fall back to SecureActionButton if restricted.
+    -- In Midnight (12.0+), C_Container.UseContainerItem is protected and can
+    -- only be called from secure code.  Our fallback creates a secure button
+    -- with type="item" and clicks it programmatically (allowed out of combat).
+    local useOk = pcall(C_Container.UseContainerItem, bag, slot)
+    if not useOk then
+        self:Debug("UseContainerItem protected – using SecureActionButton fallback")
+        self:UseItemSecure(itemID)
+    end
     self:RecordOpening(itemID)
 
     if self.db and self.db.showNotifications and not self.batchTracker.active then
@@ -821,6 +876,23 @@ function ACO:UseContainerFromBagSlot(itemID, bag, slot, itemLink)
         PlaySound(self.SOUNDS.OPEN)
     end
 
+    return true
+end
+
+-- Secure fallback: use an item via SecureActionButtonTemplate (works in 12.0+)
+-- Cannot be used in combat (InCombatLockdown check is done upstream).
+function ACO:UseItemSecure(itemID)
+    if InCombatLockdown() then
+        self:Print(ACO:Translate("SECURE_CLICK_COMBAT"), true)
+        return false
+    end
+    local btn = secureBtn
+    btn:SetAttribute("type", "item")
+    btn:SetAttribute("item", "item:" .. itemID)
+    btn:Show()
+    -- Programmatic click on secure button triggers the item use
+    btn:Click()
+    btn:Hide()
     return true
 end
 
@@ -1780,27 +1852,27 @@ end
 
 -- Format timestamp to readable date
 function ACO:FormatTimestamp(timestamp)
-    if not timestamp then return "Jamais" end
+    if not timestamp then return self:Translate("TIME_NEVER") end
     return date("%d/%m/%Y %H:%M", timestamp)
 end
 
--- Format relative time (e.g., "il y a 5 minutes")
+-- Format relative time using locale keys
 function ACO:FormatRelativeTime(timestamp)
-    if not timestamp then return "Jamais" end
+    if not timestamp then return self:Translate("TIME_NEVER") end
     
     local diff = time() - timestamp
     
     if diff < 60 then
-        return "À l'instant"
+        return self:Translate("TIME_NOW")
     elseif diff < 3600 then
         local mins = floor(diff / 60)
-        return format("Il y a %d min", mins)
+        return self:Translate("TIME_MINUTES_AGO", mins)
     elseif diff < 86400 then
         local hours = floor(diff / 3600)
-        return format("Il y a %dh", hours)
+        return self:Translate("TIME_HOURS_AGO", hours)
     else
         local days = floor(diff / 86400)
-        return format("Il y a %d jour%s", days, days > 1 and "s" or "")
+        return self:Translate("TIME_DAYS_AGO", days, days > 1 and "s" or "")
     end
 end
 
@@ -1962,6 +2034,9 @@ events["ADDON_LOADED"] = function(self, addonLoaded)
     ACO.bagStateInitialized = false
     
     ACO:Print(ACO:Translate("ADDON_LOADED"))
+    
+    -- Initialize LDB DataBroker launcher
+    ACO:InitLDB()
     
     -- Initialize UI after a short delay
     C_Timer.After(0.5, function()
@@ -2905,4 +2980,43 @@ function ACO:ShowExportFrame()
     self.ExportFrame:Show()
     self.ExportFrame.editBox:HighlightText()
     self.ExportFrame.editBox:SetFocus()
+end
+
+-- ============================================================================
+-- LDB DATABROKER PLUGIN
+-- ============================================================================
+
+function ACO:InitLDB()
+    local ldb = LibStub and LibStub:GetLibrary("LibDataBroker-1.1", true)
+    if not ldb then return end
+
+    self.ldbObject = ldb:NewDataObject("AutoChestOpener", {
+        type = "data source",
+        text = "ACO",
+        icon = "Interface\\Icons\\INV_Misc_Bag_07",
+        label = "Auto Chest Opener",
+
+        OnClick = function(_, button)
+            if button == "LeftButton" then
+                if ACO.ToggleUI then ACO:ToggleUI() end
+            elseif button == "RightButton" then
+                if ACO.db then
+                    ACO.db.enabled = not ACO.db.enabled
+                    ACO:Print(ACO:Translate("DEBUG_MODE", ACO.db.enabled and ACO:Translate("ENABLED") or ACO:Translate("DISABLED")))
+                end
+            end
+        end,
+
+        OnTooltipShow = function(tooltip)
+            tooltip:AddLine("|cff00ccffAuto Chest Opener|r")
+            local stats = ACO.db and ACO.db.stats
+            if stats then
+                tooltip:AddDoubleLine(ACO:Translate("STATS_TOTAL"), tostring(stats.totalOpened or 0), 1, 1, 1, 0, 1, 0)
+                tooltip:AddDoubleLine(ACO:Translate("STATS_SESSION"), tostring(stats.totalOpenedSession or 0), 1, 1, 1, 0, 1, 0)
+            end
+            tooltip:AddLine(" ")
+            tooltip:AddLine(ACO:Translate("MINIMAP_LEFT"), 0.6, 0.6, 0.6)
+            tooltip:AddLine(ACO:Translate("MINIMAP_RIGHT"), 0.6, 0.6, 0.6)
+        end,
+    })
 end

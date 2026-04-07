@@ -1,5 +1,19 @@
 # Auto Chest Opener
 
+## 2.2.0 — Midnight Compatibility
+### Compatibilité Midnight (12.0+)
+- **SecureActionButton fallback** : `C_Container.UseContainerItem` est désormais protégé en 12.0+. L'addon utilise maintenant un `SecureActionButtonTemplate` en fallback pour ouvrir les conteneurs hors combat.
+- **Nouveau TooltipDataLineType** : détection améliorée via les nouveaux types de lignes de tooltip 12.0 (`FlavorText`, `ItemQuality`, `UsageRequirement`, `ErrorLine`, `DisabledLine`).
+- **Mots-clés Midnight** : ajout de mots-clés pour les conteneurs de Midnight (Voidstorm, Haranir, Sunwell, Silvermoon, Amani, Zul'Aman, Quel'Thalas, Earthen, Arathi, Undermine, Venture...).
+
+### Nouvelles fonctionnalités
+- **Raccourcis clavier** : possibilité d'assigner des raccourcis via le menu Raccourcis de WoW pour « Ouvrir tous les conteneurs » et « Afficher/Masquer les options ».
+- **LDB DataBroker** : plugin DataBroker pour les barres comme Titan Panel, Bazooka, ChocolateBar, etc. Affiche les stats et permet d'ouvrir l'interface en un clic.
+
+### Optimisations
+- **Cache conteneur limité** : le cache de détection des conteneurs est maintenant purgé automatiquement au-delà de 500 entrées pour éviter les fuites mémoire.
+- **FormatRelativeTime localisé** : les temps relatifs (« Il y a 5 min », « Just now ») utilisent maintenant le système de locale au lieu d'être codés en dur en français.
+
 ## 2.1.0
 ### Détection universelle de conteneurs
 - **Mots-clés étendus** : ajout massif de mots-clés pour détecter bien plus de conteneurs (coffres, caisses, boîtes, sacs de récompense, lockboxes PvP, cadeaux de fête, coquillages, tonneaux, urnes, paniers, et bien d'autres).

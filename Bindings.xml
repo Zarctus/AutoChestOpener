@@ -1,0 +1,8 @@
+<Bindings>
+    <Binding name="ACO_OPEN_ALL" header="AUTOCHESTOPENER">
+        ACO:OpenAllContainers();
+    </Binding>
+    <Binding name="ACO_TOGGLE_UI">
+        if ACO.ToggleUI then ACO:ToggleUI() end;
+    </Binding>
+</Bindings>

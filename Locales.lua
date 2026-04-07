@@ -138,6 +138,12 @@ L["enUS"] = {
     QUEUE_RESUME = "Resume",
     -- Open failure after retries
     OPEN_FAILED_RETRY = "%s could not be opened after 3 attempts (server may require manual interaction).",
+    -- Relative time
+    TIME_NEVER = "Never",
+    TIME_NOW = "Just now",
+    TIME_MINUTES_AGO = "%d min ago",
+    TIME_HOURS_AGO = "%dh ago",
+    TIME_DAYS_AGO = "%d day%s ago",
     -- Loot summary tab
     TAB_LOOT = "Loot",
     LOOT_TITLE = "Loot Summary",
@@ -158,6 +164,11 @@ L["enUS"] = {
     EXPORT_LOOT_CSV_TITLE = "Export Loot (CSV)",
     EXPORT_LOOT_JSON_TITLE = "Export Loot (JSON)",
 }
+
+-- Keybind headers/names (must be globals for Blizzard's binding system)
+BINDING_HEADER_AUTOCHESTOPENER = "Auto Chest Opener"
+BINDING_NAME_ACO_OPEN_ALL = "Open All Containers"
+BINDING_NAME_ACO_TOGGLE_UI = "Toggle Options Window"
 
 L["frFR"] = {
     ADDON_LOADED = "Addon chargé! Tapez |cff00ccff/aco|r pour ouvrir les options.",
@@ -292,6 +303,12 @@ L["frFR"] = {
     QUEUE_RESUME = "Reprendre",
     -- Échec d'ouverture après plusieurs essais
     OPEN_FAILED_RETRY = "%s n'a pas pu être ouvert après 3 tentatives (interaction manuelle peut-être requise).",
+    -- Temps relatif
+    TIME_NEVER = "Jamais",
+    TIME_NOW = "À l'instant",
+    TIME_MINUTES_AGO = "Il y a %d min",
+    TIME_HOURS_AGO = "Il y a %dh",
+    TIME_DAYS_AGO = "Il y a %d jour%s",
     -- Onglet Butin
     TAB_LOOT = "Butin",
     LOOT_TITLE = "Résumé du butin",
@@ -312,6 +329,13 @@ L["frFR"] = {
     EXPORT_LOOT_CSV_TITLE = "Export du butin (CSV)",
     EXPORT_LOOT_JSON_TITLE = "Export du butin (JSON)",
 }
+
+-- Override keybind names for French locale
+if locale == "frFR" then
+    BINDING_HEADER_AUTOCHESTOPENER = "Auto Chest Opener"
+    BINDING_NAME_ACO_OPEN_ALL = "Ouvrir tous les conteneurs"
+    BINDING_NAME_ACO_TOGGLE_UI = "Afficher/Masquer les options"
+end
 
 -- Fallback to enUS for missing keys
 ACO.L = setmetatable({}, {
