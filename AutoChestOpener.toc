@@ -4,7 +4,7 @@
 ## Notes-frFR: Ouvre automatiquement tous types de conteneurs, coffres, sacs, caisses, boîtes, cadeaux, etc.
 ## Author: Zarctus
 ## Category: Inventory
-## Version: 2.2.0
+## Version: 2.2.1
 ## SavedVariables: AutoChestOpenerDB
 ## IconTexture: Interface\AddOns\AutoChestOpener\textures\treasure.tga
 ## X-Category: Inventory

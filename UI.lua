@@ -557,7 +557,7 @@ function ACO:InitUI()
     -- ========================================================================
 
     local OptionsSection = CreateFrame("Frame", nil, ContainersContent, "BackdropTemplate")
-    OptionsSection:SetHeight(170)
+    OptionsSection:SetHeight(195)
     OptionsSection:SetPoint("TOPLEFT", PADDING, -PADDING)
     OptionsSection:SetPoint("TOPRIGHT", -PADDING, -PADDING)
     ApplyBackdrop(OptionsSection, C.row, C.border)
@@ -600,6 +600,14 @@ function ACO:InitUI()
     AutoDiscoverCheck.checkbox:SetChecked(ACO.db.autoDiscovery ~= false)
     AutoDiscoverCheck.checkbox.callback = function(checked)
         ACO.db.autoDiscovery = checked
+    end
+
+    -- Auto-open on login checkbox
+    local AutoOpenLoginCheck = CreateModernCheckbox(OptionsSection, ACO:Translate("AUTO_OPEN_LOGIN"), ACO:Translate("AUTO_OPEN_LOGIN_TOOLTIP"))
+    AutoOpenLoginCheck:SetPoint("LEFT", AutoDiscoverCheck, "RIGHT", 80, 0)
+    AutoOpenLoginCheck.checkbox:SetChecked(ACO.db.autoOpenOnLogin == true)
+    AutoOpenLoginCheck.checkbox.callback = function(checked)
+        ACO.db.autoOpenOnLogin = checked
     end
 
     -- Delay slider
@@ -866,9 +874,73 @@ function ACO:InitUI()
         GameTooltip:Hide()
     end)
 
+    -- View toggle: Tracked | Blocked
+    UI.listView = "tracked"
+
+    local TrackedBtn = CreateModernButton(ListSection, ACO:Translate("SHOW_TRACKED"), 70, 22, true)
+    TrackedBtn:SetPoint("TOPLEFT", PADDING, -38)
+    local BlockedBtn = CreateModernButton(ListSection, ACO:Translate("SHOW_BLOCKED"), 70, 22, false)
+    BlockedBtn:SetPoint("LEFT", TrackedBtn, "RIGHT", 6, 0)
+
+    -- Search bar
+    local SearchBox = CreateFrame("EditBox", nil, ListSection, "BackdropTemplate")
+    SearchBox:SetSize(160, 22)
+    SearchBox:SetPoint("LEFT", BlockedBtn, "RIGHT", 10, 0)
+    ApplyBackdrop(SearchBox, C.bg, C.border)
+    SearchBox:SetFontObject("GameFontHighlight")
+    SearchBox:SetTextInsets(8, 8, 0, 0)
+    SearchBox:SetAutoFocus(false)
+    SearchBox:SetMaxLetters(40)
+    UI.searchFilterText = ""
+
+    local SearchPlaceholder = MakeText(SearchBox, ACO:Translate("SEARCH_PLACEHOLDER"), 11, C.textDim)
+    SearchPlaceholder:SetPoint("LEFT", 8, 0)
+
+    SearchBox:SetScript("OnTextChanged", function(box)
+        local txt = box:GetText()
+        UI.searchFilterText = txt:lower()
+        if txt ~= "" then
+            SearchPlaceholder:Hide()
+        else
+            SearchPlaceholder:Show()
+        end
+        UI:RefreshList()
+    end)
+    SearchBox:SetScript("OnEscapePressed", function(box)
+        box:SetText("")
+        box:ClearFocus()
+    end)
+
+    local function UpdateViewButtons()
+        local C2 = ACO.colors
+        if UI.listView == "tracked" then
+            TrackedBtn:SetBackdropColor(C2.accent.r * 0.25, C2.accent.g * 0.25, C2.accent.b * 0.25, 0.9)
+            TrackedBtn:SetBackdropBorderColor(C2.accent.r, C2.accent.g, C2.accent.b, 1)
+            BlockedBtn:SetBackdropColor(C2.row.r, C2.row.g, C2.row.b, C2.row.a)
+            BlockedBtn:SetBackdropBorderColor(C2.border.r, C2.border.g, C2.border.b, 1)
+        else
+            BlockedBtn:SetBackdropColor(C2.accent.r * 0.25, C2.accent.g * 0.25, C2.accent.b * 0.25, 0.9)
+            BlockedBtn:SetBackdropBorderColor(C2.accent.r, C2.accent.g, C2.accent.b, 1)
+            TrackedBtn:SetBackdropColor(C2.row.r, C2.row.g, C2.row.b, C2.row.a)
+            TrackedBtn:SetBackdropBorderColor(C2.border.r, C2.border.g, C2.border.b, 1)
+        end
+    end
+    UpdateViewButtons()
+
+    TrackedBtn:SetScript("OnClick", function()
+        UI.listView = "tracked"
+        UpdateViewButtons()
+        UI:RefreshList()
+    end)
+    BlockedBtn:SetScript("OnClick", function()
+        UI.listView = "blocked"
+        UpdateViewButtons()
+        UI:RefreshList()
+    end)
+
     -- Scroll frame
     local ScrollFrame = CreateFrame("ScrollFrame", nil, ListSection, "UIPanelScrollFrameTemplate")
-    ScrollFrame:SetPoint("TOPLEFT", PADDING, -35)
+    ScrollFrame:SetPoint("TOPLEFT", PADDING, -65)
     ScrollFrame:SetPoint("BOTTOMRIGHT", -PADDING - 20, PADDING)
 
     local ScrollChild = CreateFrame("Frame", nil, ScrollFrame)
@@ -981,7 +1053,100 @@ function ACO:InitUI()
     end
 
     -- ========================================================================
-    -- REFRESH LIST FUNCTION
+    -- BLACKLIST ITEM ROW
+    -- ========================================================================
+
+    local function CreateBlacklistItem(itemID, index)
+        local item = CreateFrame("Frame", nil, ScrollChild, "BackdropTemplate")
+        item:SetSize(ScrollFrame:GetWidth() - 10, LIST_ITEM_HEIGHT)
+        item:SetPoint("TOPLEFT", 0, -(index - 1) * (LIST_ITEM_HEIGHT + 3))
+
+        local isAlt = (index % 2 == 0)
+        local rowBg = isAlt and C.rowAlt or C.row
+        ApplyBackdrop(item, rowBg, C.border)
+        item._isAlt = isAlt
+
+        local icon = item:CreateTexture(nil, "ARTWORK")
+        icon:SetSize(26, 26)
+        icon:SetPoint("LEFT", 8, 0)
+        icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+
+        local name = MakeText(item, nil, 11, C.text, "LEFT")
+        name:SetPoint("LEFT", icon, "RIGHT", 10, 6)
+        name:SetWidth(240)
+
+        local idText = MakeText(item, format(ACO:Translate("ID_LABEL"), itemID), 9, C.textDim)
+        idText:SetPoint("LEFT", icon, "RIGHT", 10, -8)
+
+        -- "Auto-blocked" tag
+        local tag = MakeText(item, "|cffff6666[Auto]|r", 9, C.text)
+        tag:SetPoint("LEFT", idText, "RIGHT", 8, 0)
+
+        -- Unblock button
+        local unblockBtn = CreateFrame("Button", nil, item, "BackdropTemplate")
+        unblockBtn:SetSize(22, 22)
+        unblockBtn:SetPoint("RIGHT", -8, 0)
+        ApplyBackdrop(unblockBtn, { r = 0.1, g = 0.3, b = 0.1, a = 0.8 }, C.border)
+
+        local unblockIcon = unblockBtn:CreateTexture(nil, "OVERLAY")
+        unblockIcon:SetSize(12, 12)
+        unblockIcon:SetPoint("CENTER")
+        unblockIcon:SetAtlas("common-icon-checkmark")
+
+        unblockBtn:SetScript("OnEnter", function(btn)
+            btn:SetBackdropColor(0.1, 0.5, 0.1, 1)
+            btn:SetBackdropBorderColor(0.2, 0.8, 0.2, 1)
+            GameTooltip:SetOwner(btn, "ANCHOR_TOP")
+            GameTooltip:SetText(ACO:Translate("BLACKLIST_UNBLOCK_TOOLTIP"))
+            GameTooltip:Show()
+        end)
+        unblockBtn:SetScript("OnLeave", function(btn)
+            btn:SetBackdropColor(0.1, 0.3, 0.1, 0.8)
+            btn:SetBackdropBorderColor(C.border.r, C.border.g, C.border.b, 1)
+            GameTooltip:Hide()
+        end)
+        unblockBtn:SetScript("OnClick", function()
+            ACO:RemoveFromBlacklist(itemID)
+            UI:RefreshList()
+        end)
+
+        -- Load item info
+        local itemInfo = C_Item.GetItemInfo(itemID)
+        if itemInfo then
+            name:SetText(itemInfo)
+            local itemIcon = C_Item.GetItemIconByID(itemID)
+            if itemIcon then icon:SetTexture(itemIcon) end
+        else
+            name:SetText(ACO:Translate("LOADING"))
+            icon:SetTexture("Interface\\Icons\\INV_Misc_QuestionMark")
+            local item_obj = Item:CreateFromItemID(itemID)
+            item_obj:ContinueOnItemLoad(function()
+                local n = C_Item.GetItemInfo(itemID)
+                local ic = C_Item.GetItemIconByID(itemID)
+                if n then name:SetText(n) end
+                if ic then icon:SetTexture(ic) end
+            end)
+        end
+
+        item:SetScript("OnEnter", function(row)
+            row:SetBackdropColor(C.rowHover.r, C.rowHover.g, C.rowHover.b, C.rowHover.a)
+            row:SetBackdropBorderColor(C.borderLight.r, C.borderLight.g, C.borderLight.b, 1)
+            GameTooltip:SetOwner(row, "ANCHOR_CURSOR")
+            GameTooltip:SetHyperlink("item:" .. itemID)
+            GameTooltip:Show()
+        end)
+        item:SetScript("OnLeave", function(row)
+            local bg = row._isAlt and C.rowAlt or C.row
+            row:SetBackdropColor(bg.r, bg.g, bg.b, bg.a)
+            row:SetBackdropBorderColor(C.border.r, C.border.g, C.border.b, 1)
+            GameTooltip:Hide()
+        end)
+
+        return item
+    end
+
+    -- ========================================================================
+    -- REFRESH LIST FUNCTION (handles Tracked / Blocked views + search filter)
     -- ========================================================================
 
     function UI:RefreshList()
@@ -991,18 +1156,38 @@ function ACO:InitUI()
         end
         wipe(self.listItems)
 
+        local isBlocked = (self.listView == "blocked")
+        local source = isBlocked and ACO.db.blacklist or ACO.db.containers
+        local filter = self.searchFilterText or ""
+
         local index = 1
-        for itemID in pairs(ACO.db.containers) do
-            local listItem = CreateListItem(itemID, index)
-            table.insert(self.listItems, listItem)
-            index = index + 1
+        for itemID in pairs(source) do
+            local show = true
+            if filter ~= "" then
+                local idStr = tostring(itemID)
+                local itemName = (C_Item.GetItemInfo and C_Item.GetItemInfo(itemID) or ""):lower()
+                if not itemName:find(filter, 1, true) and not idStr:find(filter, 1, true) then
+                    show = false
+                end
+            end
+
+            if show then
+                local listItem = isBlocked and CreateBlacklistItem(itemID, index) or CreateListItem(itemID, index)
+                table.insert(self.listItems, listItem)
+                index = index + 1
+            end
         end
 
         ScrollChild:SetHeight(max(1, (index - 1) * (LIST_ITEM_HEIGHT + 3)))
 
         local count = index - 1
-        local suffix = (count > 1) and "s" or ""
-        self.listCount:SetText(ACO:Translate("LIST_COUNT", count, suffix))
+        if isBlocked then
+            local s = count > 1 and "s" or ""
+            self.listCount:SetText(count .. " bloqué" .. s)
+        else
+            local suffix = count > 1 and "s" or ""
+            self.listCount:SetText(ACO:Translate("LIST_COUNT", count, suffix))
+        end
     end
 
     -- ========================================================================

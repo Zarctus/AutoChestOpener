@@ -51,6 +51,8 @@ L["enUS"] = {
     OPTIONS_TITLE = "Options",
     ENABLE_AUTO_OPEN = "Enable automatic opening",
     ENABLE_TOOLTIP = "Enable or disable the addon",
+    AUTO_OPEN_LOGIN = "Auto-open on login",
+    AUTO_OPEN_LOGIN_TOOLTIP = "Automatically open all tracked containers a few seconds after logging in or /reload.",
     SHOW_NOTIFICATIONS = "Show notifications",
     SHOW_NOTIFICATIONS_TOOLTIP = "Show messages in chat",
     PLAY_SOUNDS = "Play sounds",
@@ -125,6 +127,15 @@ L["enUS"] = {
     AUTO_DISCOVER_PROMPT = "%s detected as openable container! Added to tracked list. (/aco remove %d to undo)",
     ENABLE_AUTO_DISCOVER = "Auto-discover containers",
     ENABLE_AUTO_DISCOVER_TOOLTIP = "Automatically track containers when you manually open them",
+    -- Blacklist view toggle
+    SHOW_TRACKED = "Tracked",
+    SHOW_BLOCKED = "Blocked",
+    BLACKLIST_TITLE = "Blocked Items",
+    BLACKLIST_HINT = "These items require a real click to open and were auto-blacklisted.",
+    BLACKLIST_EMPTY = "No blocked items.",
+    BLACKLIST_UNBLOCK_TOOLTIP = "Remove from blacklist",
+    -- Search
+    SEARCH_PLACEHOLDER = "Search...",
     -- Batch summary
     BATCH_SUMMARY = "Summary: %d/%d containers opened.",
     BATCH_SUMMARY_GOLD = "Gold earned: %s",
@@ -218,6 +229,8 @@ L["frFR"] = {
     OPTIONS_TITLE = "Paramètres",
     ENABLE_AUTO_OPEN = "Activer l'ouverture automatique",
     ENABLE_TOOLTIP = "Active ou désactive l'addon",
+    AUTO_OPEN_LOGIN = "Ouvrir auto au login",
+    AUTO_OPEN_LOGIN_TOOLTIP = "Ouvre automatiquement tous les conteneurs trackés quelques secondes après le login ou un /reload.",
     SHOW_NOTIFICATIONS = "Afficher les notifications",
     SHOW_NOTIFICATIONS_TOOLTIP = "Affiche les messages dans le chat",
     PLAY_SOUNDS = "Jouer les sons",
@@ -291,6 +304,15 @@ L["frFR"] = {
     AUTO_DISCOVER_PROMPT = "%s détecté comme conteneur ouvrable ! Ajouté à la liste. (/aco remove %d pour annuler)",
     ENABLE_AUTO_DISCOVER = "Auto-découverte des conteneurs",
     ENABLE_AUTO_DISCOVER_TOOLTIP = "Ajoute automatiquement les conteneurs quand vous les ouvrez manuellement",
+    -- Basculement vue blacklist
+    SHOW_TRACKED = "Trackés",
+    SHOW_BLOCKED = "Bloqués",
+    BLACKLIST_TITLE = "Items bloqués",
+    BLACKLIST_HINT = "Ces items nécessitent un vrai clic pour s'ouvrir et ont été bloqués automatiquement.",
+    BLACKLIST_EMPTY = "Aucun item bloqué.",
+    BLACKLIST_UNBLOCK_TOOLTIP = "Retirer de la blacklist",
+    -- Recherche
+    SEARCH_PLACEHOLDER = "Rechercher...",
     -- Résumé de lot
     BATCH_SUMMARY = "Résumé : %d/%d conteneurs ouverts.",
     BATCH_SUMMARY_GOLD = "Or gagné : %s",

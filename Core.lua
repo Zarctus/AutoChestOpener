@@ -1,7 +1,7 @@
 --[[
     Auto Chest Opener - Core Module
     Automatically opens all types of containers, chests, bags, crates, lockboxes, gifts and more
-    Version: 2.2.0
+    Version: 2.2.1
 ]]
 
 local addonName, ACO = ...
@@ -255,6 +255,7 @@ local defaults = {
     containers = {},        -- User-added container IDs
     blacklist = {},         -- Items to never auto-open
     autoDiscovery = true,   -- Auto-detect containers when manually opened
+    autoOpenOnLogin = false, -- Automatically open all tracked containers on login/reload
     minimap = {
         hide = false,
     },
@@ -2102,6 +2103,16 @@ events["PLAYER_ENTERING_WORLD"] = function(self, isInitialLogin, isReloadingUi)
                 for itemID in pairs(ACO.db.containers) do
                     ACO:QueueExistingContainers(itemID)
                 end
+            end
+
+            -- Auto-open on login: if enabled, open all tracked containers 3s after
+            -- bags are ready (gives the UI time to fully settle after a login/reload).
+            if ACO.db.enabled and ACO.db.autoOpenOnLogin then
+                C_Timer.After(3, function()
+                    if ACO.db and ACO.db.enabled then
+                        ACO:OpenAllContainers()
+                    end
+                end)
             end
         end
     end)
