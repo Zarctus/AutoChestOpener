@@ -955,6 +955,10 @@ function ACO:PrintBatchSummary()
 
     if goldGained > 0 then
         msg = msg .. " " .. format(ACO:Translate("BATCH_SUMMARY_GOLD"), self:FormatMoney(goldGained))
+        if elapsed > 1 then
+            local gph = floor(goldGained / elapsed * 3600)
+            msg = msg .. format(ACO:Translate("BATCH_SUMMARY_GPH"), self:FormatMoneyShort(gph))
+        end
     end
 
     msg = msg .. " " .. format(ACO:Translate("BATCH_SUMMARY_TIME"), format("%.1f", elapsed))
@@ -1766,6 +1770,66 @@ function ACO:GetLootSummary()
     return result
 end
 
+-- ============================================================================
+-- ROI / PROFITABILITY INTELLIGENCE
+-- ============================================================================
+
+-- Returns total vendor sell value (copper) of all items ever received from a container.
+function ACO:GetContainerVendorValue(containerID)
+    if not self.db or not self.db.lootSummary then return 0 end
+    local data = self.db.lootSummary[containerID]
+    if not data or not data.items then return 0 end
+    local total = 0
+    for itemID, itemData in pairs(data.items) do
+        local count = type(itemData) == "number" and itemData or (itemData.count or 0)
+        local sellPrice = C_Item.GetItemSellPrice and C_Item.GetItemSellPrice(itemID)
+                       or select(11, GetItemInfo(itemID))
+        if sellPrice and sellPrice > 0 then
+            total = total + sellPrice * count
+        end
+    end
+    return total
+end
+
+-- Returns per-open ROI stats for a container based on loot history.
+-- Returns nil if the container has never been opened.
+function ACO:GetContainerAvgValue(containerID)
+    if not self.db or not self.db.lootSummary then return nil end
+    local data = self.db.lootSummary[containerID]
+    if not data or (data.opened or 0) == 0 then return nil end
+    local opens      = data.opened
+    local goldTotal  = data.gold or 0
+    local vendorTotal = self:GetContainerVendorValue(containerID)
+    return {
+        opens     = opens,
+        avgGold   = floor(goldTotal   / opens),
+        avgVendor = floor(vendorTotal / opens),
+        avgTotal  = floor((goldTotal + vendorTotal) / opens),
+    }
+end
+
+-- Returns up to n containers sorted by average total value (gold + vendor) descending.
+function ACO:GetTopContainersByROI(n)
+    if not self.db or not self.db.lootSummary then return {} end
+    n = n or 5
+    local result = {}
+    for containerID, data in pairs(self.db.lootSummary) do
+        if (data.opened or 0) > 0 then
+            local roi = self:GetContainerAvgValue(containerID)
+            if roi then
+                tinsert(result, { containerID = containerID, roi = roi })
+            end
+        end
+    end
+    table.sort(result, function(a, b)
+        return a.roi.avgTotal > b.roi.avgTotal
+    end)
+    while #result > n do
+        tremove(result)
+    end
+    return result
+end
+
 function ACO:ClearLootSummary()
     if not self.db then return end
     wipe(self.db.lootSummary)
@@ -2085,6 +2149,13 @@ events["ADDON_LOADED"] = function(self, addonLoaded)
 end
 
 events["PLAYER_ENTERING_WORLD"] = function(self, isInitialLogin, isReloadingUi)
+    -- Reset session counters (sessionGold/totalOpenedSession live in SavedVariables
+    -- but must restart from zero each login/reload).
+    if ACO.db and ACO.db.stats then
+        ACO.db.stats.sessionGold = 0
+        ACO.db.stats.totalOpenedSession = 0
+    end
+
     -- Setup auto-discovery hook
     ACO:SetupAutoDiscoveryHook()
 

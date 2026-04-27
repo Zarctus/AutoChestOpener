@@ -973,7 +973,7 @@ function ACO:InitUI()
         -- Item name
         local name = MakeText(item, nil, 11, C.text, "LEFT")
         name:SetPoint("LEFT", icon, "RIGHT", 10, 6)
-        name:SetWidth(260)
+        name:SetWidth(180)
 
         -- Item ID
         local idText = MakeText(item, format(ACO:Translate("ID_LABEL"), itemID), 9, C.textDim)
@@ -1008,6 +1008,17 @@ function ACO:InitUI()
             ACO:RemoveContainer(itemID)
         end)
 
+        -- ROI chip: shows average value per open from loot history
+        local roiText = MakeText(item, "", 9, C.gold)
+        roiText:SetPoint("RIGHT", removeBtn, "LEFT", -6, 0)
+        roiText:SetWidth(90)
+        roiText:SetJustifyH("RIGHT")
+
+        local roi = ACO:GetContainerAvgValue(itemID)
+        if roi and roi.avgTotal > 0 then
+            roiText:SetText(format(ACO:Translate("ROI_AVG"), ACO:FormatMoneyShort(roi.avgTotal)))
+        end
+
         -- Load item info
         local itemInfo = C_Item.GetItemInfo(itemID)
         if itemInfo then
@@ -1039,6 +1050,21 @@ function ACO:InitUI()
             self:SetBackdropBorderColor(C.borderLight.r, C.borderLight.g, C.borderLight.b, 1)
             GameTooltip:SetOwner(self, "ANCHOR_CURSOR")
             GameTooltip:SetHyperlink("item:" .. itemID)
+            local roiData = ACO:GetContainerAvgValue(itemID)
+            if roiData then
+                GameTooltip:AddLine(" ")
+                GameTooltip:AddLine(ACO:Translate("ROI_TOOLTIP_TITLE"), 0, 0.8, 1)
+                GameTooltip:AddLine(format(ACO:Translate("ROI_TOOLTIP_OPENS"), roiData.opens), 0.7, 0.7, 0.7)
+                if roiData.avgGold > 0 then
+                    GameTooltip:AddLine(format(ACO:Translate("ROI_TOOLTIP_GOLD"), ACO:FormatMoneyShort(roiData.avgGold)), 1, 0.82, 0)
+                end
+                if roiData.avgVendor > 0 then
+                    GameTooltip:AddLine(format(ACO:Translate("ROI_TOOLTIP_VENDOR"), ACO:FormatMoneyShort(roiData.avgVendor)), 0.6, 0.9, 0.6)
+                end
+                if roiData.avgTotal > 0 then
+                    GameTooltip:AddLine(format(ACO:Translate("ROI_TOOLTIP_TOTAL"), ACO:FormatMoneyShort(roiData.avgTotal)), 0, 1, 0.5)
+                end
+            end
             GameTooltip:Show()
         end)
 
@@ -1381,15 +1407,19 @@ function ACO:InitUI()
 
         local nameText = MakeText(itemFrame, nil, 11, C.text, "LEFT")
         nameText:SetPoint("LEFT", icon, "RIGHT", 8, 0)
-        nameText:SetWidth(200)
+        nameText:SetWidth(155)
 
         local countText = MakeText(itemFrame, nil, 11, C.green)
         countText:SetPoint("RIGHT", -10, 0)
+
+        local valueText = MakeText(itemFrame, "", 10, C.gold)
+        valueText:SetPoint("RIGHT", countText, "LEFT", -10, 0)
 
         itemFrame.rank = rankText
         itemFrame.icon = icon
         itemFrame.name = nameText
         itemFrame.count = countText
+        itemFrame.value = valueText
         itemFrame:Hide()
 
         UI.topItemsFrames[i] = itemFrame
@@ -1418,6 +1448,13 @@ function ACO:InitUI()
                 frame:Show()
                 frame.count:SetText(format("x%d", item.count))
 
+                local roi = ACO:GetContainerAvgValue(item.itemID)
+                if roi and roi.avgTotal > 0 then
+                    frame.value:SetText(format(ACO:Translate("ROI_AVG"), ACO:FormatMoneyShort(roi.avgTotal)))
+                else
+                    frame.value:SetText("")
+                end
+
                 local itemInfo = C_Item.GetItemInfo(item.itemID)
                 local itemIcon = C_Item.GetItemIconByID(item.itemID)
 
@@ -1441,6 +1478,7 @@ function ACO:InitUI()
                 end
             else
                 frame:Hide()
+                frame.value:SetText("")
             end
         end
     end

@@ -140,6 +140,14 @@ L["enUS"] = {
     BATCH_SUMMARY = "Summary: %d/%d containers opened.",
     BATCH_SUMMARY_GOLD = "Gold earned: %s",
     BATCH_SUMMARY_TIME = "(%ss)",
+    BATCH_SUMMARY_GPH = " · %s/h",
+    -- ROI / Profitability
+    ROI_AVG = "~%s avg",
+    ROI_TOOLTIP_TITLE = "Profitability (lifetime avg)",
+    ROI_TOOLTIP_OPENS = "Opened: %d time(s)",
+    ROI_TOOLTIP_GOLD = "Avg gold: %s",
+    ROI_TOOLTIP_VENDOR = "Avg vendor items: ~%s",
+    ROI_TOOLTIP_TOTAL = "Estimated avg: ~%s/open",
     -- Queue widget
     QUEUE_OPENING = "Opening...",
     QUEUE_PAUSED = "Paused",
@@ -317,6 +325,14 @@ L["frFR"] = {
     BATCH_SUMMARY = "Résumé : %d/%d conteneurs ouverts.",
     BATCH_SUMMARY_GOLD = "Or gagné : %s",
     BATCH_SUMMARY_TIME = "(%ss)",
+    BATCH_SUMMARY_GPH = " · %s/h",
+    -- ROI / Rentabilité
+    ROI_AVG = "~%s moy.",
+    ROI_TOOLTIP_TITLE = "Rentabilité (moy. cumulée)",
+    ROI_TOOLTIP_OPENS = "Ouvert : %d fois",
+    ROI_TOOLTIP_GOLD = "Or moyen : %s",
+    ROI_TOOLTIP_VENDOR = "Items vendeur moy. : ~%s",
+    ROI_TOOLTIP_TOTAL = "Estimé moy. : ~%s/ouv.",
     -- Widget file d'attente
     QUEUE_OPENING = "Ouverture...",
     QUEUE_PAUSED = "En pause",
