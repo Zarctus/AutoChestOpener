@@ -856,14 +856,16 @@ function ACO:UseContainerFromBagSlot(itemID, bag, slot, itemLink)
     -- Snapshot bags BEFORE using the item (for loot tracking)
     self:StartLootTracking(itemID)
 
-    -- Try direct API first; fall back to SecureActionButton if restricted.
-    -- In Midnight (12.0+), C_Container.UseContainerItem is protected and can
-    -- only be called from secure code.  Our fallback creates a secure button
-    -- with type="item" and clicks it programmatically (allowed out of combat).
-    local useOk = pcall(C_Container.UseContainerItem, bag, slot)
-    if not useOk then
-        self:Debug("UseContainerItem protected – using SecureActionButton fallback")
-        self:UseItemSecure(itemID)
+    -- Always use SecureActionButton to avoid taint: direct C_Container.UseContainerItem
+    -- called from addon Lua can succeed at the Lua level (no error) but be silently
+    -- rejected server-side for items that require a clean/secure call stack.
+    -- SecureActionButton with type="macro" + "/use BAG SLOT" replicates an exact
+    -- right-click by the player and is always accepted.  Fall back to direct API
+    -- only if the secure button is unavailable (e.g. some edge UI state).
+    local secureOk = self:UseItemSecure(itemID, bag, slot)
+    if not secureOk then
+        self:Debug("SecureActionButton indisponible – tentative via API directe")
+        pcall(C_Container.UseContainerItem, bag, slot)
     end
     self:RecordOpening(itemID)
 
@@ -879,18 +881,25 @@ function ACO:UseContainerFromBagSlot(itemID, bag, slot, itemLink)
     return true
 end
 
--- Secure fallback: use an item via SecureActionButtonTemplate (works in 12.0+)
+-- Use an item via SecureActionButtonTemplate to avoid Lua taint.
+-- With bag+slot: uses type="macro" + "/use BAG SLOT" which is identical to a
+-- player right-click and is always accepted by the server.
+-- Without bag+slot: falls back to type="item" + "item:XXXXX" (item-by-ID lookup).
 -- Cannot be used in combat (InCombatLockdown check is done upstream).
-function ACO:UseItemSecure(itemID)
+function ACO:UseItemSecure(itemID, bag, slot)
     if InCombatLockdown() then
         self:Print(ACO:Translate("SECURE_CLICK_COMBAT"), true)
         return false
     end
     local btn = secureBtn
-    btn:SetAttribute("type", "item")
-    btn:SetAttribute("item", "item:" .. itemID)
+    if bag and slot then
+        btn:SetAttribute("type", "macro")
+        btn:SetAttribute("macrotext", format("/use %d %d", bag, slot))
+    else
+        btn:SetAttribute("type", "item")
+        btn:SetAttribute("item", "item:" .. itemID)
+    end
     btn:Show()
-    -- Programmatic click on secure button triggers the item use
     btn:Click()
     btn:Hide()
     return true
@@ -1081,6 +1090,26 @@ function ACO:ProcessQueueTick()
             local fb, fs, fi = selfRef:FindItemInBags(verifyID)
             if not fb then return end  -- item was consumed – all good
 
+            -- Item still locked means the server is still processing the open request
+            -- (e.g. loot window open, network delay). Wait another cycle instead of
+            -- counting this as a failed attempt.
+            if fi and fi.isLocked then
+                selfRef:Debug(format("Item %d verrouillé lors de la vérification %d – en attente", verifyID, verifyRound + 1))
+                local waitEntry = {
+                    itemID      = verifyID,
+                    bag         = fb,
+                    slot        = fs,
+                    link        = (fi and fi.hyperlink) or verifyLink,
+                    executeAt   = GetTime() + 1.5,
+                    source      = "RETRY",
+                    tries       = 0,
+                    verifyRound = verifyRound,  -- same round: locked doesn't count as an attempt
+                }
+                selfRef:InsertOpenQueueEntry(waitEntry)
+                selfRef:StartQueueWorker()
+                return
+            end
+
             if verifyRound < 2 then
                 -- Still present: queue another attempt
                 selfRef:Debug(format("Item %d toujours en sac après UseContainerItem (vérification %d) – nouvel essai", verifyID, verifyRound + 1))
@@ -1098,8 +1127,16 @@ function ACO:ProcessQueueTick()
                 selfRef:StartQueueWorker()
             else
                 -- All retries exhausted and item is still present.
+                -- Auto-blacklist: the server requires a real hardware event (mouse/key)
+                -- to open this item and silently rejects all programmatic calls.
+                -- Blacklisting prevents repeated failed attempts on future logins.
                 local ilink = (fi and fi.hyperlink) or selfRef:FormatItemLink(verifyID)
-                selfRef:Print(ACO:Translate("OPEN_FAILED_RETRY", ilink), true)
+                if selfRef.db and selfRef.db.blacklist then
+                    selfRef.db.blacklist[verifyID] = true
+                    selfRef:Print(ACO:Translate("AUTO_BLACKLISTED", ilink, verifyID), true)
+                else
+                    selfRef:Print(ACO:Translate("OPEN_FAILED_RETRY", ilink), true)
+                end
             end
         end)
         return

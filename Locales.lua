@@ -138,6 +138,7 @@ L["enUS"] = {
     QUEUE_RESUME = "Resume",
     -- Open failure after retries
     OPEN_FAILED_RETRY = "%s could not be opened after 3 attempts (server may require manual interaction).",
+    AUTO_BLACKLISTED = "%s requires a real click to open (server protection). Added to blacklist — use |cff00ccff/aco blacklist remove %d|r to undo.",
     -- Relative time
     TIME_NEVER = "Never",
     TIME_NOW = "Just now",
@@ -303,6 +304,7 @@ L["frFR"] = {
     QUEUE_RESUME = "Reprendre",
     -- Échec d'ouverture après plusieurs essais
     OPEN_FAILED_RETRY = "%s n'a pas pu être ouvert après 3 tentatives (interaction manuelle peut-être requise).",
+    AUTO_BLACKLISTED = "%s nécessite un vrai clic pour s'ouvrir (protection serveur). Ajouté à la liste noire — utilisez |cff00ccff/aco blacklist remove %d|r pour annuler.",
     -- Temps relatif
     TIME_NEVER = "Jamais",
     TIME_NOW = "À l'instant",
