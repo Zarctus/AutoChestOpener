@@ -1,7 +1,7 @@
 --[[
     Auto Chest Opener - Core Module
     Automatically opens all types of containers, chests, bags, crates, lockboxes, gifts and more
-    Version: 2.2.2
+    Version: 2.2.3
 ]]
 
 local addonName, ACO = ...
