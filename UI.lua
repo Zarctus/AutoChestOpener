@@ -927,13 +927,45 @@ function ACO:InitUI()
     end
     UpdateViewButtons()
 
+    local ClearBlacklistBtn = CreateModernButton(ListSection, ACO:Translate("CLEAR_BLACKLIST_BTN"), 80, 22, false)
+    ClearBlacklistBtn:SetPoint("LEFT", BlockedBtn, "RIGHT", 10, 0)
+    ClearBlacklistBtn:SetScript("OnClick", function()
+        StaticPopup_Show("ACO_CLEAR_BLACKLIST")
+    end)
+    ClearBlacklistBtn:SetScript("OnEnter", function(btn)
+        btn:SetBackdropColor(C.red.r * 0.3, C.red.g * 0.3, C.red.b * 0.3, 1)
+        btn:SetBackdropBorderColor(C.red.r, C.red.g, C.red.b, 1)
+        btn.text:SetTextColor(1, 1, 1)
+        GameTooltip:SetOwner(btn, "ANCHOR_TOP")
+        GameTooltip:AddLine(ACO:Translate("CLEAR_BLACKLIST_T1"), 1, 0.3, 0.3)
+        GameTooltip:AddLine(ACO:Translate("CLEAR_BLACKLIST_T2"), 0.8, 0.8, 0.8)
+        GameTooltip:Show()
+    end)
+    ClearBlacklistBtn:SetScript("OnLeave", function(btn)
+        btn:SetBackdropColor(C.row.r, C.row.g, C.row.b, C.row.a)
+        btn:SetBackdropBorderColor(C.border.r, C.border.g, C.border.b, 1)
+        btn.text:SetTextColor(C.text.r, C.text.g, C.text.b)
+        GameTooltip:Hide()
+    end)
+    ClearBlacklistBtn:Hide()
+
+    -- Move the search box to after the clear button
+    SearchBox:ClearAllPoints()
+    SearchBox:SetPoint("LEFT", ClearBlacklistBtn, "RIGHT", 10, 0)
+
     TrackedBtn:SetScript("OnClick", function()
         UI.listView = "tracked"
+        ClearBlacklistBtn:Hide()
+        SearchBox:ClearAllPoints()
+        SearchBox:SetPoint("LEFT", BlockedBtn, "RIGHT", 10, 0)
         UpdateViewButtons()
         UI:RefreshList()
     end)
     BlockedBtn:SetScript("OnClick", function()
         UI.listView = "blocked"
+        ClearBlacklistBtn:Show()
+        SearchBox:ClearAllPoints()
+        SearchBox:SetPoint("LEFT", ClearBlacklistBtn, "RIGHT", 10, 0)
         UpdateViewButtons()
         UI:RefreshList()
     end)
@@ -1940,6 +1972,20 @@ function ACO:InitUI()
         button2 = ACO:Translate("POPUP_NO"),
         OnAccept = function()
             ACO:RemoveAllContainers()
+        end,
+        timeout = 0,
+        whileDead = true,
+        hideOnEscape = true,
+        preferredIndex = 3,
+    }
+
+    StaticPopupDialogs["ACO_CLEAR_BLACKLIST"] = {
+        text = ACO:Translate("POPUP_CLEAR_BLACKLIST_TEXT"),
+        button1 = ACO:Translate("POPUP_YES"),
+        button2 = ACO:Translate("POPUP_NO"),
+        OnAccept = function()
+            ACO:ClearBlacklist()
+            UI:RefreshList()
         end,
         timeout = 0,
         whileDead = true,
