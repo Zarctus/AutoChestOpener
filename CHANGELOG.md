@@ -1,6 +1,6 @@
 # Auto Chest Opener
 
-## 2.2.3 — Midnight Compatibility
+## 2.2.4 — Midnight Compatibility
 ### Compatibilité Midnight (12.0+)
 - **SecureActionButton fallback** : `C_Container.UseContainerItem` est désormais protégé en 12.0+. L'addon utilise maintenant un `SecureActionButtonTemplate` en fallback pour ouvrir les conteneurs hors combat.
 - **Nouveau TooltipDataLineType** : détection améliorée via les nouveaux types de lignes de tooltip 12.0 (`FlavorText`, `ItemQuality`, `UsageRequirement`, `ErrorLine`, `DisabledLine`).
