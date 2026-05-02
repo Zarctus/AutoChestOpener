@@ -947,8 +947,8 @@ end
 function ACO:StartQueueWorker()
     if self.queueTicker then return end
 
-    -- Show queue widget
-    if self.UI and self.UI.queueWidget then
+    -- Show queue widget only when there are items to process (avoids flash on blocker release)
+    if self.UI and self.UI.queueWidget and #self.openQueue > 0 then
         self.UI.queueWidget:Show()
     end
 

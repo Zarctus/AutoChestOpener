@@ -2071,9 +2071,14 @@ function ACO:InitUI()
     MinimapButton:RegisterForDrag("LeftButton")
     MinimapButton:SetClampedToScreen(true)
 
-    -- Position
+    -- Position — radius adapts to the actual minimap size (supports 110%+ resized minimaps)
+    local function GetMinimapRadius()
+        local w = Minimap:GetWidth()
+        return ((w and w > 0) and w or 140) / 2 + 5
+    end
+
     local angle = math.rad(220)
-    local radius = 80
+    local radius = GetMinimapRadius()
     MinimapButton:SetPoint("CENTER", Minimap, "CENTER",
         radius * cos(angle), radius * sin(angle))
 
@@ -2121,8 +2126,9 @@ function ACO:InitUI()
             cx, cy = cx / scale, cy / scale
 
             local a = math.atan2(cy - my, cx - mx)
-            local x = cos(a) * radius
-            local y = sin(a) * radius
+            local r = GetMinimapRadius()
+            local x = cos(a) * r
+            local y = sin(a) * r
 
             self:ClearAllPoints()
             self:SetPoint("CENTER", Minimap, "CENTER", x, y)
