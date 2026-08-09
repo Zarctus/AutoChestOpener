@@ -1,155 +1,104 @@
-# Auto Chest Opener
+# Auto Chest Opener 3.1.0
 
-![Version](https://img.shields.io/badge/version-1.3.5-blue)
-![WoW Version](https://img.shields.io/badge/WoW-12.0.0-orange)
-![License](https://img.shields.io/badge/license-MIT-green)
+Addon World of Warcraft Retail ciblant l’interface **120007 (12.0.7)**.
 
-## Description
+## Nouveautés 3.1
 
-**Auto Chest Opener** est un addon élégant et moderne pour World of Warcraft qui ouvre automatiquement vos coffres, sacs et conteneurs après les avoir reçus dans votre inventaire.
+### Centre de file
 
-## Fonctionnalités
+L’onglet **En attente** affiche maintenant la véritable file d’ouverture, et non une simple liste des conteneurs présents dans les sacs.
 
-- 🎁 **Ouverture automatique** des coffres et conteneurs
-- ⏱️ **Délai personnalisable** (0 à 10 secondes)
-- 🖱️ **Glisser-déposer** pour ajouter des items
-- 🔢 **Ajout par ID** d'item
-- 🎨 **Interface moderne** avec système d'onglets
-- 📊 **Statistiques détaillées** (total ouvert, top items, timestamps)
-- � **Tracking de l'or** gagné (total et par session)
-- 📜 **Historique** des 50 dernières ouvertures avec or gagné
-- 📍 **Bouton minimap** avec clic gauche/droit
-- 🔊 **Notifications sonores** optionnelles
-- 💬 **Notifications dans le chat** optionnelles
-- 📤 **Import/Export** de listes de conteneurs
+Chaque entrée expose :
+
+- son état : attente, délai, blocage, ouverture, vérification, nouvel essai ou échec ;
+- la raison exacte du blocage ou de l’échec ;
+- le nombre de tentatives ;
+- une estimation du délai restant ;
+- les actions Réessayer et Retirer lorsque cela s’applique.
+
+La file peut être mise en pause, reprise, vidée ou avancée manuellement.
+
+### Mode assisté
+
+Le mode **Assisté** prépare le prochain conteneur sur un véritable `SecureActionButtonTemplate`. Le joueur effectue alors un clic matériel sur **Ouvrir le suivant**.
+
+Ce mode ne contourne pas les protections de Blizzard. Il fournit un chemin fiable lorsque l’utilisation automatique d’un objet est refusée par le client.
+
+Le bouton sécurisé est disponible :
+
+- dans l’onglet En attente ;
+- dans le widget flottant de file lorsque la fenêtre principale est fermée.
+
+### Règles par conteneur
+
+Le bouton d’engrenage de chaque ligne ouvre un éditeur permettant de régler :
+
+- l’ouverture automatique pour cet objet ;
+- un délai spécifique, ou le délai global ;
+- une limite d’ouvertures par session ;
+- une priorité de file de -10 à 10 ;
+- un blocage temporaire en minutes ;
+- une source et une note personnelles ;
+- un blocage permanent.
+
+Les priorités ne permettent pas à un objet temporairement bloqué de retenir les autres entrées prêtes.
+
+### Données et diagnostics
+
+- Schéma de SavedVariables **4**, migré automatiquement depuis les versions précédentes.
+- Succès, échecs, dernière réussite et dernier motif d’échec conservés par conteneur.
+- Historique persistant borné des 50 derniers échecs.
+- Limites de session appliquées dès la mise en file et à nouveau avant l’ouverture.
+- Les piles sont correctement développées par `Ouvrir tout`.
 
 ## Installation
 
-1. Téléchargez l'addon
-2. Extrayez le dossier `AutoChestOpener` dans :
-   ```
-   World of Warcraft\_retail_\Interface\AddOns\
-   ```
-3. Redémarrez World of Warcraft ou tapez `/reload`
+1. Fermer World of Warcraft.
+2. Extraire le dossier `AutoChestOpener` dans :
 
-## Utilisation
+   `World of Warcraft/_retail_/Interface/AddOns/`
 
-### Interface graphique
+3. Vérifier que ce fichier existe directement dans le dossier :
 
-- Cliquez sur le **bouton minimap** (icône de coffre) ou tapez `/aco`
-- **Glissez un item** dans la zone de dépôt pour l'ajouter
-- Ou entrez l'**ID de l'item** et cliquez sur "Ajouter"
-- Configurez les options selon vos préférences
+   `AutoChestOpener/AutoChestOpener.toc`
 
-### Commandes slash
+4. Relancer le jeu ou utiliser `/reload`.
 
-| Commande | Description |
-|----------|-------------|
-| `/aco` | Ouvre l'interface |
-| `/aco add <itemID>` | Ajoute un conteneur par ID |
-| `/aco remove <itemID>` | Retire un conteneur |
-| `/aco list` | Liste tous les conteneurs |
-| `/aco openall` | Ouvre tous les conteneurs maintenant |
-| `/aco toggle` | Active/Désactive l'addon |
-| `/aco delay <sec>` | Change le délai (0-30s) |
-| `/aco stats` | Affiche les statistiques |
-| `/aco history` | Affiche l'historique récent |
-| `/aco clearstats` | Réinitialise les statistiques |
-| `/aco clearhistory` | Efface l'historique |
-| `/aco export` | Exporte la liste |
-| `/aco import` | Importe une liste |
-| `/aco debug` | Mode debug |
+Les données 3.0.x sont conservées et migrées automatiquement. Une sauvegarde du dossier `WTF` reste recommandée avant un test majeur.
 
-### Bouton Minimap
+## Commandes principales
 
-- **Clic gauche** : Ouvre l'interface
-- **Clic droit** : Active/Désactive l'addon
-- **Glisser** : Déplace le bouton autour de la minimap
+| Commande | Action |
+|---|---|
+| `/aco` | Afficher ou masquer l’interface |
+| `/aco add <itemID>` | Ajouter un conteneur |
+| `/aco remove <itemID>` | Retirer un conteneur |
+| `/aco openall` | Mettre en file tous les conteneurs éligibles |
+| `/aco mode auto` | Utiliser le mode automatique |
+| `/aco mode assisted` | Utiliser le mode assisté |
+| `/aco next` | Préparer ou accélérer le prochain élément |
+| `/aco queue` | Ouvrir directement le centre de file |
+| `/aco queue clear` | Vider la file active |
+| `/aco queue failures` | Effacer les échecs affichés |
+| `/aco rules <itemID>` | Ouvrir l’éditeur de règles d’un conteneur |
+| `/aco diag` | Afficher les diagnostics 120007 et de file |
+| `/aco resetui` | Réinitialiser la fenêtre |
 
-### Astuce
+Un raccourci **Préparer/Ouvrir le prochain élément** est également disponible dans les raccourcis clavier du jeu.
 
-- Maintenez **ALT + Clic gauche** sur un lien d'item dans le chat pour l'ajouter directement à la liste !
+## Limite importante de l’API Retail
 
-## Comment ça marche
+Certaines utilisations d’objets peuvent être refusées silencieusement lorsque le client exige une action matérielle réelle. L’addon :
 
-1. Ajoutez les IDs des coffres/sacs que vous voulez ouvrir automatiquement
-2. L'addon détecte automatiquement les items avec un sort "Ouvrir"
-3. Quand vous recevez un item de la liste dans votre inventaire, il sera ouvert après le délai configuré
-4. L'ouverture ne se fait pas en combat pour éviter les problèmes
+- vérifie que la quantité du conteneur a réellement diminué ;
+- n’enregistre jamais une ouverture avant cette confirmation ;
+- effectue des essais limités en mode automatique ;
+- propose le mode assisté pour effectuer le clic sécurisé légitime.
 
-## Exemples d'items compatibles
+## Tests
 
-- Coffres de donjon
-- Sacs de butin
-- Caisses de quête
-- Conteneurs d'événements
-- Tout item avec le sort "Ouvrir"
-
-## Configuration
-
-### Paramètres disponibles
-
-| Option | Description |
-|--------|-------------|
-| Activer l'ouverture | Active/désactive l'addon |
-| Afficher les notifications | Messages dans le chat |
-| Jouer les sons | Effets sonores lors de l'ouverture |
-| Délai avant ouverture | Temps d'attente (0-10 secondes) |
-
-## Dépannage
-
-**L'addon ne s'ouvre pas :**
-- Vérifiez que le dossier est bien dans `Interface\AddOns\`
-- Vérifiez que le dossier s'appelle exactement `AutoChestOpener`
-
-**Un item n'est pas ouvert automatiquement :**
-- Vérifiez qu'il est bien dans la liste
-- Vérifiez que l'addon est activé
-- Certains items nécessitent des conditions spéciales (niveau, profession, etc.)
-
-**Erreurs en combat :**
-- Normal ! L'addon attend la fin du combat pour ouvrir les items
-
-## Changelog
-
-### Version 1.2.0
-- ✨ **Nouveau:** Onglet Statistiques avec compteurs détaillés
-- ✨ **Nouveau:** Onglet Historique des 50 dernières ouvertures
-- ✨ **Nouveau:** Top 5 des items les plus ouverts
-- ✨ **Nouveau:** Commandes `/aco stats` et `/aco history`
-- ✨ **Nouveau:** Boutons réinitialisation stats/historique
-- 💰 **Nouveau:** Tracking de l'or gagné (total et par session)
-- 💰 **Nouveau:** Affichage de l'or dans l'historique
-- 🎨 Interface avec système d'onglets (Conteneurs, Stats, Historique)
-- ⚡ Optimisations de performance (upvalues locales, cache)
-- 🌐 Support multi-langues étendu (russe, coréen)
-
-### Version 1.1.0
-- ⚡ Optimisations de performance
-- 🔧 Cache des items conteneurs
-- 📦 Import/Export de listes
-
-### Version 1.0.0
-- Première version
-- Interface moderne style nouvelle UI WoW
-- Drag & drop pour ajouter des items
-- Ajout par ID
-- Paramètres personnalisables
-- Bouton minimap
-- Commandes slash complètes
+Consulter `TESTING.md`. La validation syntaxique et les simulations fournies ne remplacent pas un test dans le client Retail 12.0.7.
 
 ## Licence
 
-MIT License - Libre d'utilisation et de modification
-
-## Crédits
-
-Créé par **Zayu**
-
----
-
-*Enjoy your automatic chest opening! 🎁*
-
-
-### 1.3.3
-- L'ouverture est automatiquement mise en attente si vous êtes en combat ou si une fenêtre sensible est ouverte (marchand/banque/courrier/HV/échange). Elle reprend automatiquement dès que c'est possible.
+MIT.

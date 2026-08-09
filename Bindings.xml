@@ -5,4 +5,7 @@
     <Binding name="ACO_TOGGLE_UI">
         if ACO.ToggleUI then ACO:ToggleUI() end;
     </Binding>
+    <Binding name="ACO_OPEN_NEXT">
+        ACO:OpenNextQueueEntry();
+    </Binding>
 </Bindings>

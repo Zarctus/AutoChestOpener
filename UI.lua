@@ -1,7 +1,7 @@
 --[[
     Auto Chest Opener - UI Module
     Midnight-style interface (palette unifiée Zayu / Zarctus)
-    Version: 2.1.0
+    Version: 3.1.0
 ]]
 
 local addonName, ACO = ...
@@ -39,16 +39,18 @@ local UI = ACO.UI
 -- UI CONSTANTS
 -- ============================================================================
 
-local FRAME_WIDTH = 560
-local FRAME_HEIGHT = 600
-local FRAME_MIN_WIDTH = 420
-local FRAME_MIN_HEIGHT = 500
-local FRAME_MAX_WIDTH = 750
+local FRAME_WIDTH = 940
+local FRAME_HEIGHT = 710
+local FRAME_MIN_WIDTH = 820
+local FRAME_MIN_HEIGHT = 680
+local FRAME_MAX_WIDTH = 1200
 local FRAME_MAX_HEIGHT = 950
-local HEADER_HEIGHT = 36
-local TAB_HEIGHT = 30
-local BUTTON_HEIGHT = 28
-local LIST_ITEM_HEIGHT = 38
+local HEADER_HEIGHT = 54
+local TAB_HEIGHT = 38
+local KPI_HEIGHT = 82
+local LEFT_COLUMN_WIDTH = 300
+local BUTTON_HEIGHT = 30
+local LIST_ITEM_HEIGHT = 48
 local PADDING = 12
 
 -- ============================================================================
@@ -139,37 +141,42 @@ end
 local function CreateModernCheckbox(parent, label, tooltip)
     local C = ACO.colors
     local frame = CreateFrame("Frame", nil, parent)
-    frame:SetSize(200, 24)
+    frame:SetSize(270, 26)
 
     local checkbox = CreateFrame("CheckButton", nil, frame, "BackdropTemplate")
-    checkbox:SetSize(18, 18)
-    checkbox:SetPoint("LEFT")
-    ApplyBackdrop(checkbox, C.row, C.border)
+    checkbox:SetSize(38, 20)
+    checkbox:SetPoint("RIGHT", frame, "RIGHT", 0, 0)
+    ApplyBackdrop(checkbox, C.bg, C.border)
 
-    local check = checkbox:CreateTexture(nil, "OVERLAY")
-    check:SetSize(12, 12)
-    check:SetPoint("CENTER")
-    check:SetTexture("Interface\\Buttons\\UI-CheckBox-Check")
-    check:SetVertexColor(C.accent.r, C.accent.g, C.accent.b)
-    check:Hide()
-    checkbox.check = check
+    local knob = CreateFrame("Frame", nil, checkbox, "BackdropTemplate")
+    knob:SetSize(14, 14)
+    ApplyBackdrop(knob, C.textDim, C.borderLight)
+
+    local function UpdateVisual(self)
+        knob:ClearAllPoints()
+        if self:GetChecked() then
+            self:SetBackdropColor(C.accent.r * 0.35, C.accent.g * 0.35, C.accent.b * 0.35, 1)
+            self:SetBackdropBorderColor(C.accent.r, C.accent.g, C.accent.b, 1)
+            knob:SetPoint("RIGHT", -3, 0)
+            knob:SetBackdropColor(C.accent.r, C.accent.g, C.accent.b, 1)
+        else
+            self:SetBackdropColor(C.bg.r, C.bg.g, C.bg.b, 1)
+            self:SetBackdropBorderColor(C.border.r, C.border.g, C.border.b, 1)
+            knob:SetPoint("LEFT", 3, 0)
+            knob:SetBackdropColor(C.textDim.r, C.textDim.g, C.textDim.b, 1)
+        end
+    end
 
     local originalSetChecked = checkbox.SetChecked
     checkbox.SetChecked = function(self, checked)
-        originalSetChecked(self, checked)
-        if checked then check:Show() else check:Hide() end
+        originalSetChecked(self, checked and true or false)
+        UpdateVisual(self)
     end
 
     checkbox:SetScript("OnClick", function(self)
-        local isChecked = self:GetChecked()
-        if isChecked then
-            check:Show()
-            PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
-        else
-            check:Hide()
-            PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_OFF)
-        end
-        if self.callback then self.callback(isChecked) end
+        UpdateVisual(self)
+        PlaySound(self:GetChecked() and SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON or SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_OFF)
+        if self.callback then self.callback(self:GetChecked()) end
     end)
 
     checkbox:SetScript("OnEnter", function(self)
@@ -182,16 +189,19 @@ local function CreateModernCheckbox(parent, label, tooltip)
     end)
 
     checkbox:SetScript("OnLeave", function(self)
-        self:SetBackdropBorderColor(C.border.r, C.border.g, C.border.b, 1)
+        UpdateVisual(self)
         GameTooltip:Hide()
     end)
 
     local text = MakeText(frame, label, 11, C.text)
-    text:SetPoint("LEFT", checkbox, "RIGHT", 8, 0)
+    text:SetPoint("LEFT", 0, 0)
+    text:SetPoint("RIGHT", checkbox, "LEFT", -8, 0)
+    text:SetJustifyH("LEFT")
 
     frame.checkbox = checkbox
     frame.label = text
-
+    frame.UpdateVisual = UpdateVisual
+    UpdateVisual(checkbox)
     return frame
 end
 
@@ -201,95 +211,146 @@ end
 
 local function CreateModernSlider(parent, label, minVal, maxVal, step, tooltip)
     local C = ACO.colors
-    local frame = CreateFrame("Frame", nil, parent, "BackdropTemplate")
-    frame:SetSize(300, 50)
+    local frame = CreateFrame("Frame", nil, parent)
+    frame:SetSize(270, 56)
 
     local text = MakeText(frame, label, 11, C.text)
-    text:SetPoint("TOPLEFT", 0, 0)
+    text:SetPoint("TOPLEFT", 0, -2)
 
-    local valueText = MakeText(frame, "", 11, C.accent)
-    valueText:SetPoint("TOPRIGHT", 0, 0)
+    local valueBox = CreateFrame("EditBox", nil, frame, "BackdropTemplate")
+    valueBox:SetSize(48, 22)
+    valueBox:SetPoint("TOPRIGHT", -14, 0)
+    ApplyBackdrop(valueBox, C.bg, C.border)
+    valueBox:SetFontObject("GameFontHighlightSmall")
+    valueBox:SetJustifyH("CENTER")
+    valueBox:SetAutoFocus(false)
+    valueBox:SetMaxLetters(4)
+
+    local suffix = MakeText(frame, "s", 10, C.textDim)
+    suffix:SetPoint("LEFT", valueBox, "RIGHT", 4, 0)
 
     local track = CreateFrame("Frame", nil, frame, "BackdropTemplate")
-    track:SetSize(280, 8)
-    track:SetPoint("TOP", 0, -22)
+    track:SetPoint("TOPLEFT", 0, -31)
+    track:SetPoint("TOPRIGHT", 0, -31)
+    track:SetHeight(7)
     ApplyBackdrop(track, C.bg, C.border)
+    track:EnableMouse(true)
 
     local fill = track:CreateTexture(nil, "ARTWORK")
     fill:SetPoint("LEFT", 2, 0)
-    fill:SetHeight(4)
+    fill:SetHeight(3)
     fill:SetColorTexture(C.accent.r, C.accent.g, C.accent.b, 1)
 
     local thumb = CreateFrame("Button", nil, track, "BackdropTemplate")
-    thumb:SetSize(14, 14)
+    thumb:SetSize(13, 15)
     ApplyBackdrop(thumb, C.accent, C.borderLight)
     thumb:EnableMouse(true)
     thumb:RegisterForDrag("LeftButton")
 
-    local function UpdateSlider(value)
+    local minText = MakeText(frame, tostring(minVal) .. "s", 8, C.textDim)
+    minText:SetPoint("TOPLEFT", track, "BOTTOMLEFT", 0, -3)
+    local maxText = MakeText(frame, tostring(maxVal) .. "s", 8, C.textDim)
+    maxText:SetPoint("TOPRIGHT", track, "BOTTOMRIGHT", 0, -3)
+
+    local updatingText = false
+    local committingValue = false
+    local function FormatValue(value)
+        if value == floor(value) then
+            return format("%d", value)
+        end
+        return format("%.1f", value)
+    end
+
+    local function UpdateSlider(value, suppressCallback)
+        value = tonumber(value) or minVal
         value = max(minVal, min(maxVal, value))
         if step then
             value = floor(value / step + 0.5) * step
         end
 
         local percent = (value - minVal) / (maxVal - minVal)
-        local trackWidth = track:GetWidth() - thumb:GetWidth()
+        local trackWidth = max(1, track:GetWidth() - thumb:GetWidth())
 
+        thumb:ClearAllPoints()
         thumb:SetPoint("LEFT", track, "LEFT", percent * trackWidth, 0)
         fill:SetWidth(max(1, percent * trackWidth))
 
-        if value == floor(value) then
-            valueText:SetText(format("%d", value) .. "s")
-        else
-            valueText:SetText(format("%.1f", value) .. "s")
-        end
+        updatingText = true
+        valueBox:SetText(FormatValue(value))
+        updatingText = false
 
         frame.value = value
-        if frame.callback then frame.callback(value) end
+        if frame.callback and not suppressCallback then frame.callback(value) end
     end
+
+    local function CommitValue()
+        if updatingText or committingValue then return end
+        committingValue = true
+        local value = tonumber(valueBox:GetText())
+        if value then
+            UpdateSlider(value)
+        else
+            UpdateSlider(frame.value or minVal, true)
+        end
+        valueBox:ClearFocus()
+        committingValue = false
+    end
+
+    valueBox:SetScript("OnEnterPressed", CommitValue)
+    valueBox:SetScript("OnEscapePressed", function(self)
+        UpdateSlider(frame.value or minVal, true)
+        self:ClearFocus()
+    end)
+    valueBox:SetScript("OnEditFocusLost", function()
+        if not updatingText then CommitValue() end
+    end)
 
     thumb:SetScript("OnDragStart", function(self) self.isDragging = true end)
     thumb:SetScript("OnDragStop", function(self) self.isDragging = false end)
 
+    local function SetFromCursor(self)
+        local x = select(1, GetCursorPosition()) / self:GetEffectiveScale()
+        local left = self:GetLeft()
+        local width = max(1, self:GetWidth() - thumb:GetWidth())
+        local percent = max(0, min(1, (x - left - thumb:GetWidth() / 2) / width))
+        UpdateSlider(minVal + percent * (maxVal - minVal))
+    end
+
     track:SetScript("OnMouseDown", function(self, button)
-        if button == "LeftButton" then
-            local x = select(1, GetCursorPosition()) / self:GetEffectiveScale()
-            local left = self:GetLeft()
-            local width = self:GetWidth() - thumb:GetWidth()
-            local percent = max(0, min(1, (x - left - thumb:GetWidth()/2) / width))
-            UpdateSlider(minVal + percent * (maxVal - minVal))
-        end
+        if button == "LeftButton" then SetFromCursor(self) end
+    end)
+    track:SetScript("OnUpdate", function(self)
+        if thumb.isDragging then SetFromCursor(self) end
     end)
 
-    track:SetScript("OnUpdate", function(self)
-        if thumb.isDragging then
-            local x = select(1, GetCursorPosition()) / self:GetEffectiveScale()
-            local left = self:GetLeft()
-            local width = self:GetWidth() - thumb:GetWidth()
-            local percent = max(0, min(1, (x - left - thumb:GetWidth()/2) / width))
-            UpdateSlider(minVal + percent * (maxVal - minVal))
-        end
-    end)
+    if tooltip then
+        frame:EnableMouse(true)
+        frame:SetScript("OnEnter", function(self)
+            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+            GameTooltip:SetText(tooltip, 1, 1, 1, 1, true)
+            GameTooltip:Show()
+        end)
+        frame:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    end
 
     frame.UpdateSlider = UpdateSlider
-    frame.valueText = valueText
-
-    frame:SetScript("OnShow", function()
-        C_Timer.After(0.05, function()
-            if frame.pendingValue then
-                UpdateSlider(frame.pendingValue)
-                frame.pendingValue = nil
-            end
-        end)
-    end)
-
+    frame.valueText = valueBox
+    frame.valueBox = valueBox
     frame.SetValue = function(self, val)
         if track:GetWidth() > 0 then
-            UpdateSlider(val)
+            UpdateSlider(val, true)
         else
             self.pendingValue = val
         end
     end
+    frame:SetScript("OnShow", function()
+        C_Timer.After(0.05, function()
+            if frame.pendingValue ~= nil then
+                UpdateSlider(frame.pendingValue, true)
+                frame.pendingValue = nil
+            end
+        end)
+    end)
 
     return frame
 end
@@ -303,13 +364,29 @@ function ACO:InitUI()
 
     -- Main Frame
     local MainFrame = CreateFrame("Frame", "AutoChestOpenerFrame", UIParent, "BackdropTemplate")
-    MainFrame:SetSize(FRAME_WIDTH, FRAME_HEIGHT)
-    MainFrame:SetPoint("CENTER")
+    local uiState = ACO.db.ui or {}
+    MainFrame:SetSize(uiState.width or FRAME_WIDTH, uiState.height or FRAME_HEIGHT)
+    MainFrame:SetPoint(uiState.point or "CENTER", UIParent, uiState.relativePoint or "CENTER", uiState.x or 0, uiState.y or 0)
     MainFrame:SetMovable(true)
     MainFrame:EnableMouse(true)
     MainFrame:RegisterForDrag("LeftButton")
+
+    local function SaveFrameState()
+        if not ACO.db or not ACO.db.ui then return end
+        local point, _, relativePoint, x, y = MainFrame:GetPoint(1)
+        ACO.db.ui.point = point or "CENTER"
+        ACO.db.ui.relativePoint = relativePoint or point or "CENTER"
+        ACO.db.ui.x = floor((x or 0) + 0.5)
+        ACO.db.ui.y = floor((y or 0) + 0.5)
+        ACO.db.ui.width = floor(MainFrame:GetWidth() + 0.5)
+        ACO.db.ui.height = floor(MainFrame:GetHeight() + 0.5)
+    end
+
     MainFrame:SetScript("OnDragStart", MainFrame.StartMoving)
-    MainFrame:SetScript("OnDragStop", MainFrame.StopMovingOrSizing)
+    MainFrame:SetScript("OnDragStop", function(self)
+        self:StopMovingOrSizing()
+        SaveFrameState()
+    end)
     MainFrame:SetClampedToScreen(true)
     MainFrame:SetFrameStrata("HIGH")
     MainFrame:SetFrameLevel(100)
@@ -348,6 +425,7 @@ function ACO:InitUI()
     ResizeHandle:SetScript("OnMouseUp", function(self, button)
         resizeTex:SetTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Highlight")
         MainFrame:StopMovingOrSizing()
+        SaveFrameState()
     end)
 
     -- ========================================================================
@@ -369,20 +447,32 @@ function ACO:InitUI()
 
     -- Icon
     local Icon = Header:CreateTexture(nil, "ARTWORK")
-    Icon:SetSize(28, 28)
-    Icon:SetPoint("LEFT", PADDING, 0)
+    Icon:SetSize(36, 36)
+    Icon:SetPoint("LEFT", PADDING + 2, 0)
     Icon:SetAtlas("VignetteLootChest")
 
     -- Title (styled like MidnightWeekly: first word cyan, rest text color)
-    local Title = MakeText(Header, nil, 14, nil)
-    Title:SetPoint("LEFT", Icon, "RIGHT", 10, 0)
+    local Title = MakeText(Header, nil, 18, nil)
+    Title:SetPoint("TOPLEFT", Icon, "TOPRIGHT", 10, -2)
     Title:SetText("|cff00ccffAuto|r|cff" .. format("%02x%02x%02x",
         floor(C.text.r*255), floor(C.text.g*255), floor(C.text.b*255))
         .. "ChestOpener|r")
 
     -- Version
-    local Version = MakeText(Header, "v" .. ACO.version, 10, C.textDim)
-    Version:SetPoint("LEFT", Title, "RIGHT", 8, 0)
+    local Version = MakeText(Header, "v" .. ACO.version .. "  •  Retail 120007", 10, C.textDim)
+    Version:SetPoint("TOPLEFT", Title, "BOTTOMLEFT", 0, -3)
+
+    -- Theme marker: intentionally text-only so it reads as metadata, not a button.
+    local RuntimeBadge = CreateFrame("Frame", nil, Header)
+    RuntimeBadge:SetSize(118, 24)
+    RuntimeBadge:SetPoint("RIGHT", -44, 0)
+    local RuntimeText = MakeText(RuntimeBadge, "MIDNIGHT 2.0", 9, C.textDim)
+    RuntimeText:SetPoint("CENTER")
+    local runtimeLine = RuntimeBadge:CreateTexture(nil, "ARTWORK")
+    runtimeLine:SetHeight(1)
+    runtimeLine:SetPoint("BOTTOMLEFT", 14, 2)
+    runtimeLine:SetPoint("BOTTOMRIGHT", -14, 2)
+    runtimeLine:SetColorTexture(C.accent.r, C.accent.g, C.accent.b, 0.55)
 
     -- Close button (common-search-clearbutton like MidnightWeekly)
     local CloseBtn = CreateFrame("Button", nil, Header)
@@ -415,38 +505,150 @@ function ACO:InitUI()
     TabContainer:SetPoint("TOPRIGHT", Header, "BOTTOMRIGHT", -1, 0)
     ApplyBackdrop(TabContainer, C.bg, C.border)
 
+    -- ========================================================================
+    -- KPI STRIP (Concept 1: session gold / confirmed opens / pending queue)
+    -- ========================================================================
+
+    local KPIFrame = CreateFrame("Frame", nil, MainFrame, "BackdropTemplate")
+    KPIFrame:SetHeight(KPI_HEIGHT)
+    KPIFrame:SetPoint("TOPLEFT", TabContainer, "BOTTOMLEFT", PADDING, -PADDING)
+    KPIFrame:SetPoint("TOPRIGHT", TabContainer, "BOTTOMRIGHT", -PADDING, -PADDING)
+    ApplyBackdrop(KPIFrame, C.header, C.border)
+
+    local function CreateKPICard(parent, iconSource, label, useTexture)
+        local card = CreateFrame("Frame", nil, parent, "BackdropTemplate")
+        ApplyBackdrop(card, C.rowAlt, C.border)
+        -- KPI text used to be chained label -> value -> detail. Font metrics and
+        -- UI scale could then push the detail line below the card. Every line now
+        -- owns an explicit bounded region inside the card instead.
+        if card.SetClipsChildren then
+            card:SetClipsChildren(true)
+        end
+
+        local icon = card:CreateTexture(nil, "ARTWORK")
+        icon:SetSize(30, 30)
+        icon:SetPoint("LEFT", 14, 0)
+        if useTexture then
+            icon:SetTexture(iconSource)
+        else
+            icon:SetAtlas(iconSource)
+            icon:SetVertexColor(C.accent.r, C.accent.g, C.accent.b)
+        end
+
+        local textLeft = 56
+
+        local labelText = MakeText(card, label, 9, C.textDim, "LEFT")
+        labelText:SetPoint("TOPLEFT", card, "TOPLEFT", textLeft, -6)
+        labelText:SetPoint("TOPRIGHT", card, "TOPRIGHT", -10, -6)
+        labelText:SetHeight(10)
+        labelText:SetJustifyV("MIDDLE")
+        if labelText.SetWordWrap then labelText:SetWordWrap(false) end
+        if labelText.SetMaxLines then labelText:SetMaxLines(1) end
+
+        local valueText = MakeText(card, "0", 20, C.text, "LEFT")
+        valueText:SetPoint("TOPLEFT", card, "TOPLEFT", textLeft, -17)
+        valueText:SetPoint("TOPRIGHT", card, "TOPRIGHT", -10, -17)
+        valueText:SetHeight(24)
+        valueText:SetJustifyV("MIDDLE")
+        if valueText.SetWordWrap then valueText:SetWordWrap(false) end
+        if valueText.SetMaxLines then valueText:SetMaxLines(1) end
+
+        local detailText = MakeText(card, "", 9, C.textDim, "LEFT")
+        detailText:SetPoint("BOTTOMLEFT", card, "BOTTOMLEFT", textLeft, 6)
+        detailText:SetPoint("BOTTOMRIGHT", card, "BOTTOMRIGHT", -10, 6)
+        detailText:SetHeight(10)
+        detailText:SetJustifyV("MIDDLE")
+        if detailText.SetWordWrap then detailText:SetWordWrap(false) end
+        if detailText.SetMaxLines then detailText:SetMaxLines(1) end
+
+        card.icon = icon
+        card.valueText = valueText
+        card.detailText = detailText
+        return card
+    end
+
+    local GoldKPI = CreateKPICard(KPIFrame, "Interface\\MoneyFrame\\UI-GoldIcon", ACO:Translate("KPI_SESSION_GOLD"), true)
+    local OpenedKPI = CreateKPICard(KPIFrame, "VignetteLootChest", ACO:Translate("KPI_OPENED_SESSION"))
+    local QueueKPI = CreateKPICard(KPIFrame, "QuestNormal", ACO:Translate("KPI_PENDING_QUEUE"))
+
+    local function LayoutKPIs()
+        local available = max(300, KPIFrame:GetWidth() - 24)
+        local width = floor((available - 16) / 3)
+        GoldKPI:ClearAllPoints()
+        GoldKPI:SetPoint("TOPLEFT", 12, -9)
+        GoldKPI:SetSize(width, KPI_HEIGHT - 18)
+        OpenedKPI:ClearAllPoints()
+        OpenedKPI:SetPoint("LEFT", GoldKPI, "RIGHT", 8, 0)
+        OpenedKPI:SetSize(width, KPI_HEIGHT - 18)
+        QueueKPI:ClearAllPoints()
+        QueueKPI:SetPoint("LEFT", OpenedKPI, "RIGHT", 8, 0)
+        QueueKPI:SetSize(width, KPI_HEIGHT - 18)
+    end
+    KPIFrame:SetScript("OnSizeChanged", LayoutKPIs)
+    C_Timer.After(0, LayoutKPIs)
+
+    UI.kpiGold = GoldKPI
+    UI.kpiOpened = OpenedKPI
+    UI.kpiQueue = QueueKPI
+
+    function UI:RefreshKPI()
+        if not ACO.db or not ACO.db.stats then return end
+        local stats = ACO.db.stats
+        GoldKPI.valueText:SetText(ACO:FormatMoneyShort(stats.sessionGold or 0))
+        GoldKPI.detailText:SetText(ACO:Translate("KPI_THIS_SESSION"))
+        OpenedKPI.valueText:SetText(tostring(stats.totalOpenedSession or 0))
+        OpenedKPI.detailText:SetText(format(ACO:Translate("KPI_LIFETIME_FORMAT"), stats.totalOpened or 0))
+
+        local pending = #(ACO.openQueue or {}) + (ACO.pendingVerifications or 0)
+        QueueKPI.valueText:SetText(tostring(pending))
+        local blocked, reason = ACO:IsOpeningBlocked()
+        if ACO.queuePaused then
+            QueueKPI.detailText:SetText(ACO:Translate("QUEUE_PAUSED"))
+            QueueKPI.detailText:SetTextColor(C.orange.r, C.orange.g, C.orange.b)
+        elseif blocked then
+            QueueKPI.detailText:SetText(ACO:GetBlockReasonText(reason))
+            QueueKPI.detailText:SetTextColor(C.red.r, C.red.g, C.red.b)
+        elseif ACO.assistedEntry then
+            QueueKPI.detailText:SetText(ACO:Translate("QUEUE_STATUS_ASSISTED_READY"))
+            QueueKPI.detailText:SetTextColor(C.green.r, C.green.g, C.green.b)
+        else
+            QueueKPI.detailText:SetText(ACO:Translate("KPI_READY"))
+            QueueKPI.detailText:SetTextColor(C.green.r, C.green.g, C.green.b)
+        end
+    end
+
     -- Content frames for each tab
     local ContainersContent = CreateFrame("Frame", nil, MainFrame)
-    ContainersContent:SetPoint("TOPLEFT", TabContainer, "BOTTOMLEFT", 0, 0)
+    ContainersContent:SetPoint("TOPLEFT", KPIFrame, "BOTTOMLEFT", -PADDING, -PADDING)
     ContainersContent:SetPoint("BOTTOMRIGHT", MainFrame, "BOTTOMRIGHT", 0, 0)
 
     local StatsContent = CreateFrame("Frame", nil, MainFrame)
-    StatsContent:SetPoint("TOPLEFT", TabContainer, "BOTTOMLEFT", 0, 0)
+    StatsContent:SetPoint("TOPLEFT", KPIFrame, "BOTTOMLEFT", -PADDING, -PADDING)
     StatsContent:SetPoint("BOTTOMRIGHT", MainFrame, "BOTTOMRIGHT", 0, 0)
     StatsContent:Hide()
 
     local HistoryContent = CreateFrame("Frame", nil, MainFrame)
-    HistoryContent:SetPoint("TOPLEFT", TabContainer, "BOTTOMLEFT", 0, 0)
+    HistoryContent:SetPoint("TOPLEFT", KPIFrame, "BOTTOMLEFT", -PADDING, -PADDING)
     HistoryContent:SetPoint("BOTTOMRIGHT", MainFrame, "BOTTOMRIGHT", 0, 0)
     HistoryContent:Hide()
 
     local PendingContent = CreateFrame("Frame", nil, MainFrame)
-    PendingContent:SetPoint("TOPLEFT", TabContainer, "BOTTOMLEFT", 0, 0)
+    PendingContent:SetPoint("TOPLEFT", KPIFrame, "BOTTOMLEFT", -PADDING, -PADDING)
     PendingContent:SetPoint("BOTTOMRIGHT", MainFrame, "BOTTOMRIGHT", 0, 0)
     PendingContent:Hide()
 
     local LootContent = CreateFrame("Frame", nil, MainFrame)
-    LootContent:SetPoint("TOPLEFT", TabContainer, "BOTTOMLEFT", 0, 0)
+    LootContent:SetPoint("TOPLEFT", KPIFrame, "BOTTOMLEFT", -PADDING, -PADDING)
     LootContent:SetPoint("BOTTOMRIGHT", MainFrame, "BOTTOMRIGHT", 0, 0)
     LootContent:Hide()
 
     UI.tabs = {}
-    UI.currentTab = "containers"
+    UI.tabOrder = {}
+    UI.currentTab = (ACO.db.ui and ACO.db.ui.lastTab) or "containers"
 
     local function CreateTab(parent, text, icon, tabKey, xOffset)
         local tab = CreateFrame("Button", nil, parent, "BackdropTemplate")
-        tab:SetSize(105, TAB_HEIGHT)
-        tab:SetPoint("LEFT", xOffset, 0)
+        tab:SetSize(120, TAB_HEIGHT)
         ApplyBackdrop(tab, C.bg, { r = 0, g = 0, b = 0, a = 0 })
 
         local tabIcon = tab:CreateTexture(nil, "ARTWORK")
@@ -503,6 +705,7 @@ function ACO:InitUI()
 
         tab.UpdateAppearance = UpdateTabAppearance
         UI.tabs[tabKey] = tab
+        tinsert(UI.tabOrder, tab)
 
         return tab
     end
@@ -513,8 +716,21 @@ function ACO:InitUI()
     local pendingTab = CreateTab(TabContainer, ACO:Translate("TAB_PENDING"), "QuestNormal", "pending", PADDING + 324)
     local lootTab = CreateTab(TabContainer, ACO:Translate("TAB_LOOT"), "Auctioneer", "loot", PADDING + 432)
 
+    local function LayoutTabs()
+        local width = max(100, floor((TabContainer:GetWidth() - (PADDING * 2)) / #UI.tabOrder))
+        for index, tab in ipairs(UI.tabOrder) do
+            tab:ClearAllPoints()
+            tab:SetSize(width, TAB_HEIGHT)
+            tab:SetPoint("LEFT", TabContainer, "LEFT", PADDING + ((index - 1) * width), 0)
+        end
+    end
+    TabContainer:SetScript("OnSizeChanged", LayoutTabs)
+    C_Timer.After(0, LayoutTabs)
+
     function UI:SwitchTab(tabKey)
+        if not self.tabs[tabKey] then tabKey = "containers" end
         self.currentTab = tabKey
+        if ACO.db and ACO.db.ui then ACO.db.ui.lastTab = tabKey end
 
         ContainersContent:Hide()
         StatsContent:Hide()
@@ -548,18 +764,18 @@ function ACO:InitUI()
         end
     end
 
-    -- Initialize first tab as active
-    containersTab.isActive = true
-    containersTab:UpdateAppearance()
+    -- Initialize persisted tab as active
+    local initialTab = UI.tabs[UI.currentTab] or containersTab
+    initialTab.isActive = true
+    initialTab:UpdateAppearance()
 
     -- ========================================================================
     -- OPTIONS SECTION (inside ContainersContent)
     -- ========================================================================
 
     local OptionsSection = CreateFrame("Frame", nil, ContainersContent, "BackdropTemplate")
-    OptionsSection:SetHeight(195)
+    OptionsSection:SetSize(LEFT_COLUMN_WIDTH, 286)
     OptionsSection:SetPoint("TOPLEFT", PADDING, -PADDING)
-    OptionsSection:SetPoint("TOPRIGHT", -PADDING, -PADDING)
     ApplyBackdrop(OptionsSection, C.row, C.border)
 
     local OptionsIcon = OptionsSection:CreateTexture(nil, "ARTWORK")
@@ -572,7 +788,8 @@ function ACO:InitUI()
 
     -- Enable checkbox
     local EnableCheck = CreateModernCheckbox(OptionsSection, ACO:Translate("ENABLE_AUTO_OPEN"), ACO:Translate("ENABLE_TOOLTIP"))
-    EnableCheck:SetPoint("TOPLEFT", OptionsTitle, "BOTTOMLEFT", 0, -12)
+    EnableCheck:SetPoint("TOPLEFT", OptionsSection, "TOPLEFT", PADDING, -42)
+    EnableCheck:SetPoint("TOPRIGHT", OptionsSection, "TOPRIGHT", -PADDING, -42)
     EnableCheck.checkbox:SetChecked(ACO.db.enabled)
     EnableCheck.checkbox.callback = function(checked)
         ACO.db.enabled = checked
@@ -580,7 +797,8 @@ function ACO:InitUI()
 
     -- Notifications checkbox
     local NotifyCheck = CreateModernCheckbox(OptionsSection, ACO:Translate("SHOW_NOTIFICATIONS"), ACO:Translate("SHOW_NOTIFICATIONS_TOOLTIP"))
-    NotifyCheck:SetPoint("TOPLEFT", EnableCheck, "BOTTOMLEFT", 0, -8)
+    NotifyCheck:SetPoint("TOPLEFT", EnableCheck, "BOTTOMLEFT", 0, -5)
+    NotifyCheck:SetPoint("TOPRIGHT", EnableCheck, "BOTTOMRIGHT", 0, -5)
     NotifyCheck.checkbox:SetChecked(ACO.db.showNotifications)
     NotifyCheck.checkbox.callback = function(checked)
         ACO.db.showNotifications = checked
@@ -588,7 +806,8 @@ function ACO:InitUI()
 
     -- Sound checkbox
     local SoundCheck = CreateModernCheckbox(OptionsSection, ACO:Translate("PLAY_SOUNDS"), ACO:Translate("PLAY_SOUNDS_TOOLTIP"))
-    SoundCheck:SetPoint("LEFT", NotifyCheck, "RIGHT", 80, 0)
+    SoundCheck:SetPoint("TOPLEFT", NotifyCheck, "BOTTOMLEFT", 0, -6)
+    SoundCheck:SetPoint("TOPRIGHT", NotifyCheck, "BOTTOMRIGHT", 0, -6)
     SoundCheck.checkbox:SetChecked(ACO.db.notificationSound)
     SoundCheck.checkbox.callback = function(checked)
         ACO.db.notificationSound = checked
@@ -596,7 +815,8 @@ function ACO:InitUI()
 
     -- Auto-discovery checkbox
     local AutoDiscoverCheck = CreateModernCheckbox(OptionsSection, ACO:Translate("ENABLE_AUTO_DISCOVER"), ACO:Translate("ENABLE_AUTO_DISCOVER_TOOLTIP"))
-    AutoDiscoverCheck:SetPoint("TOPLEFT", NotifyCheck, "BOTTOMLEFT", 0, -8)
+    AutoDiscoverCheck:SetPoint("TOPLEFT", SoundCheck, "BOTTOMLEFT", 0, -6)
+    AutoDiscoverCheck:SetPoint("TOPRIGHT", SoundCheck, "BOTTOMRIGHT", 0, -6)
     AutoDiscoverCheck.checkbox:SetChecked(ACO.db.autoDiscovery ~= false)
     AutoDiscoverCheck.checkbox.callback = function(checked)
         ACO.db.autoDiscovery = checked
@@ -604,7 +824,8 @@ function ACO:InitUI()
 
     -- Auto-open on login checkbox
     local AutoOpenLoginCheck = CreateModernCheckbox(OptionsSection, ACO:Translate("AUTO_OPEN_LOGIN"), ACO:Translate("AUTO_OPEN_LOGIN_TOOLTIP"))
-    AutoOpenLoginCheck:SetPoint("LEFT", AutoDiscoverCheck, "RIGHT", 80, 0)
+    AutoOpenLoginCheck:SetPoint("TOPLEFT", AutoDiscoverCheck, "BOTTOMLEFT", 0, -6)
+    AutoOpenLoginCheck:SetPoint("TOPRIGHT", AutoDiscoverCheck, "BOTTOMRIGHT", 0, -6)
     AutoOpenLoginCheck.checkbox:SetChecked(ACO.db.autoOpenOnLogin == true)
     AutoOpenLoginCheck.checkbox.callback = function(checked)
         ACO.db.autoOpenOnLogin = checked
@@ -612,7 +833,8 @@ function ACO:InitUI()
 
     -- Delay slider
     local DelaySlider = CreateModernSlider(OptionsSection, ACO:Translate("DELAY_SLIDER_LABEL"), 0, 10, 0.5, ACO:Translate("DELAY_TOOLTIP"))
-    DelaySlider:SetPoint("TOPLEFT", AutoDiscoverCheck, "BOTTOMLEFT", 0, -12)
+    DelaySlider:SetPoint("TOPLEFT", AutoOpenLoginCheck, "BOTTOMLEFT", 0, -9)
+    DelaySlider:SetPoint("TOPRIGHT", AutoOpenLoginCheck, "BOTTOMRIGHT", 0, -9)
     DelaySlider.callback = function(value)
         ACO.db.delay = value
     end
@@ -627,25 +849,13 @@ function ACO:InitUI()
         end)
     end)
 
-    C_Timer.After(0.5, function()
-        if DelaySlider.valueText then
-            local val = ACO.db.delay
-            if val == floor(val) then
-                DelaySlider.valueText:SetText(format("%d", val) .. "s")
-            else
-                DelaySlider.valueText:SetText(format("%.1f", val) .. "s")
-            end
-        end
-    end)
-
     -- ========================================================================
     -- ADD ITEM SECTION (inside ContainersContent)
     -- ========================================================================
 
     local AddSection = CreateFrame("Frame", nil, ContainersContent, "BackdropTemplate")
-    AddSection:SetHeight(90)
+    AddSection:SetSize(LEFT_COLUMN_WIDTH, 166)
     AddSection:SetPoint("TOPLEFT", OptionsSection, "BOTTOMLEFT", 0, -PADDING)
-    AddSection:SetPoint("TOPRIGHT", OptionsSection, "BOTTOMRIGHT", 0, -PADDING)
     ApplyBackdrop(AddSection, C.row, C.border)
 
     local AddIcon = AddSection:CreateTexture(nil, "ARTWORK")
@@ -658,8 +868,8 @@ function ACO:InitUI()
 
     -- Drop zone
     local DropZone = CreateFrame("Button", nil, AddSection, "BackdropTemplate")
-    DropZone:SetSize(200, 40)
-    DropZone:SetPoint("LEFT", PADDING, -8)
+    DropZone:SetSize(LEFT_COLUMN_WIDTH - (PADDING * 2), 64)
+    DropZone:SetPoint("TOPLEFT", PADDING, -38)
     ApplyBackdrop(DropZone, C.bg, C.border)
 
     local DropText = MakeText(DropZone, ACO:Translate("DROPZONE_EMPTY"), 11, C.textDim)
@@ -708,8 +918,8 @@ function ACO:InitUI()
 
     -- ID Input
     local IDInput = CreateFrame("EditBox", nil, AddSection, "BackdropTemplate")
-    IDInput:SetSize(100, 40)
-    IDInput:SetPoint("LEFT", DropZone, "RIGHT", 10, 0)
+    IDInput:SetHeight(34)
+    IDInput:SetPoint("TOPLEFT", DropZone, "BOTTOMLEFT", 0, -10)
     ApplyBackdrop(IDInput, C.bg, C.border)
     IDInput:SetFontObject("GameFontHighlight")
     IDInput:SetTextInsets(10, 10, 0, 0)
@@ -743,8 +953,9 @@ function ACO:InitUI()
     end)
 
     -- Add button
-    local AddBtn = CreateModernButton(AddSection, ACO:Translate("ADD_BTN"), 80, 40, true)
-    AddBtn:SetPoint("LEFT", IDInput, "RIGHT", 10, 0)
+    local AddBtn = CreateModernButton(AddSection, ACO:Translate("ADD_BTN"), 88, 34, true)
+    AddBtn:SetPoint("TOPRIGHT", DropZone, "BOTTOMRIGHT", 0, -10)
+    IDInput:SetPoint("RIGHT", AddBtn, "LEFT", -10, 0)
     AddBtn:SetScript("OnClick", function()
         local id = tonumber(IDInput:GetText())
         if id then
@@ -760,10 +971,9 @@ function ACO:InitUI()
     -- ========================================================================
 
     local ListSection = CreateFrame("Frame", nil, ContainersContent, "BackdropTemplate")
-    ListSection:SetPoint("TOPLEFT", AddSection, "BOTTOMLEFT", 0, -PADDING)
-    ListSection:SetPoint("TOPRIGHT", AddSection, "BOTTOMRIGHT", 0, -PADDING)
-    ListSection:SetPoint("BOTTOMLEFT", ContainersContent, "BOTTOMLEFT", 0, PADDING)
-    ListSection:SetPoint("BOTTOMRIGHT", ContainersContent, "BOTTOMRIGHT", 0, PADDING)
+    ListSection:SetPoint("TOPLEFT", OptionsSection, "TOPRIGHT", PADDING, 0)
+    ListSection:SetPoint("TOPRIGHT", ContainersContent, "TOPRIGHT", -PADDING, -PADDING)
+    ListSection:SetPoint("BOTTOMRIGHT", ContainersContent, "BOTTOMRIGHT", -PADDING, PADDING)
     ApplyBackdrop(ListSection, C.row, C.border)
 
     local ListIcon = ListSection:CreateTexture(nil, "ARTWORK")
@@ -772,7 +982,7 @@ function ACO:InitUI()
     ListIcon:SetAtlas("VignetteLootChest")
 
     local ListTitle = MakeText(ListSection, ACO:Translate("LIST_TITLE"), 12, C.gold)
-    ListTitle:SetPoint("LEFT", ListIcon, "RIGHT", -15, 0)
+    ListTitle:SetPoint("LEFT", ListIcon, "RIGHT", 6, 0)
 
     -- Count
     local ListCount = MakeText(ListSection, "", 10, C.textDim)
@@ -780,8 +990,15 @@ function ACO:InitUI()
     UI.listCount = ListCount
 
     -- Open All Button
-    local OpenAllBtn = CreateModernButton(ListSection, ACO:Translate("OPEN_ALL"), 90, 24, true)
-    OpenAllBtn:SetPoint("TOPRIGHT", -PADDING, -PADDING + 4)
+    local OpenAllBtn = CreateModernButton(ListSection, ACO:Translate("OPEN_ALL"), 124, 30, true)
+    OpenAllBtn:SetPoint("BOTTOMLEFT", PADDING, PADDING)
+    local openAllIcon = OpenAllBtn:CreateTexture(nil, "ARTWORK")
+    openAllIcon:SetSize(16, 16)
+    openAllIcon:SetPoint("LEFT", 12, 0)
+    openAllIcon:SetAtlas("BonusLoot-Chest")
+    openAllIcon:SetVertexColor(C.accent.r, C.accent.g, C.accent.b)
+    OpenAllBtn.text:ClearAllPoints()
+    OpenAllBtn.text:SetPoint("CENTER", 10, 0)
     OpenAllBtn:SetScript("OnClick", function()
         local count = ACO:OpenAllContainers()
         if count > 0 then
@@ -808,8 +1025,8 @@ function ACO:InitUI()
     end)
 
     -- Import Button
-    local ImportBtn = CreateModernButton(ListSection, ACO:Translate("IMPORT_BTN"), 60, 24, false)
-    ImportBtn:SetPoint("RIGHT", OpenAllBtn, "LEFT", -8, 0)
+    local ImportBtn = CreateModernButton(ListSection, ACO:Translate("IMPORT_BTN"), 72, 30, false)
+    ImportBtn:SetPoint("LEFT", OpenAllBtn, "RIGHT", 8, 0)
     ImportBtn:SetScript("OnClick", function()
         ACO:ShowImportFrame()
     end)
@@ -830,8 +1047,8 @@ function ACO:InitUI()
     end)
 
     -- Export Button
-    local ExportBtn = CreateModernButton(ListSection, ACO:Translate("EXPORT_BTN"), 60, 24, false)
-    ExportBtn:SetPoint("RIGHT", ImportBtn, "LEFT", -8, 0)
+    local ExportBtn = CreateModernButton(ListSection, ACO:Translate("EXPORT_BTN"), 72, 30, false)
+    ExportBtn:SetPoint("LEFT", ImportBtn, "RIGHT", 8, 0)
     ExportBtn:SetScript("OnClick", function()
         ACO:ShowExportFrame()
     end)
@@ -852,8 +1069,8 @@ function ACO:InitUI()
     end)
 
     -- Remove All Button
-    local RemoveAllBtn = CreateModernButton(ListSection, ACO:Translate("REMOVE_ALL_BTN"), 80, 24, false)
-    RemoveAllBtn:SetPoint("RIGHT", ExportBtn, "LEFT", -8, 0)
+    local RemoveAllBtn = CreateModernButton(ListSection, ACO:Translate("REMOVE_ALL_BTN"), 88, 30, false)
+    RemoveAllBtn:SetPoint("BOTTOMRIGHT", -PADDING, PADDING)
     RemoveAllBtn:SetScript("OnClick", function()
         StaticPopup_Show("ACO_REMOVE_ALL_CONTAINERS")
     end)
@@ -875,34 +1092,67 @@ function ACO:InitUI()
     end)
 
     -- View toggle: Tracked | Blocked
-    UI.listView = "tracked"
+    UI.listView = (ACO.db.ui and ACO.db.ui.listView) or "tracked"
 
-    local TrackedBtn = CreateModernButton(ListSection, ACO:Translate("SHOW_TRACKED"), 70, 22, true)
+    local TrackedBtn = CreateModernButton(ListSection, ACO:Translate("SHOW_TRACKED"), 78, 26, true)
     TrackedBtn:SetPoint("TOPLEFT", PADDING, -38)
-    local BlockedBtn = CreateModernButton(ListSection, ACO:Translate("SHOW_BLOCKED"), 70, 22, false)
+    local BlockedBtn = CreateModernButton(ListSection, ACO:Translate("SHOW_BLOCKED"), 78, 26, false)
     BlockedBtn:SetPoint("LEFT", TrackedBtn, "RIGHT", 6, 0)
 
-    -- Search bar
+    -- Search bar: flexible width, built-in icon and explicit clear action.
     local SearchBox = CreateFrame("EditBox", nil, ListSection, "BackdropTemplate")
-    SearchBox:SetSize(160, 22)
+    SearchBox:SetHeight(26)
     SearchBox:SetPoint("LEFT", BlockedBtn, "RIGHT", 10, 0)
+    SearchBox:SetPoint("RIGHT", ListSection, "RIGHT", -PADDING, 0)
     ApplyBackdrop(SearchBox, C.bg, C.border)
     SearchBox:SetFontObject("GameFontHighlight")
-    SearchBox:SetTextInsets(8, 8, 0, 0)
+    SearchBox:SetTextInsets(28, 28, 0, 0)
     SearchBox:SetAutoFocus(false)
-    SearchBox:SetMaxLetters(40)
-    UI.searchFilterText = ""
+    SearchBox:SetMaxLetters(80)
+    UI.searchFilterText = (ACO.db.ui and ACO.db.ui.search or ""):lower()
+
+    local searchIcon = SearchBox:CreateTexture(nil, "ARTWORK")
+    searchIcon:SetSize(14, 14)
+    searchIcon:SetPoint("LEFT", 8, 0)
+    searchIcon:SetTexture("Interface\\Common\\UI-Searchbox-Icon")
+    searchIcon:SetVertexColor(C.textDim.r, C.textDim.g, C.textDim.b)
 
     local SearchPlaceholder = MakeText(SearchBox, ACO:Translate("SEARCH_PLACEHOLDER"), 11, C.textDim)
-    SearchPlaceholder:SetPoint("LEFT", 8, 0)
+    SearchPlaceholder:SetPoint("LEFT", 28, 0)
+
+    local SearchClear = CreateFrame("Button", nil, SearchBox)
+    SearchClear:SetSize(18, 18)
+    SearchClear:SetPoint("RIGHT", -5, 0)
+    local searchClearTex = SearchClear:CreateTexture(nil, "ARTWORK")
+    searchClearTex:SetAllPoints()
+    searchClearTex:SetAtlas("common-search-clearbutton", true)
+    searchClearTex:SetVertexColor(C.textDim.r, C.textDim.g, C.textDim.b)
+    SearchClear:Hide()
+    SearchClear:SetScript("OnEnter", function()
+        searchClearTex:SetVertexColor(C.text.r, C.text.g, C.text.b)
+        GameTooltip:SetOwner(SearchClear, "ANCHOR_TOP")
+        GameTooltip:SetText(ACO:Translate("SEARCH_CLEAR_TOOLTIP"))
+        GameTooltip:Show()
+    end)
+    SearchClear:SetScript("OnLeave", function()
+        searchClearTex:SetVertexColor(C.textDim.r, C.textDim.g, C.textDim.b)
+        GameTooltip:Hide()
+    end)
+    SearchClear:SetScript("OnClick", function()
+        SearchBox:SetText("")
+        SearchBox:ClearFocus()
+    end)
 
     SearchBox:SetScript("OnTextChanged", function(box)
         local txt = box:GetText()
         UI.searchFilterText = txt:lower()
+        if ACO.db and ACO.db.ui then ACO.db.ui.search = txt end
         if txt ~= "" then
             SearchPlaceholder:Hide()
+            SearchClear:Show()
         else
             SearchPlaceholder:Show()
+            SearchClear:Hide()
         end
         UI:RefreshList()
     end)
@@ -910,6 +1160,12 @@ function ACO:InitUI()
         box:SetText("")
         box:ClearFocus()
     end)
+
+    if ACO.db.ui and ACO.db.ui.search and ACO.db.ui.search ~= "" then
+        SearchBox:SetText(ACO.db.ui.search)
+        SearchPlaceholder:Hide()
+        SearchClear:Show()
+    end
 
     local function UpdateViewButtons()
         local C2 = ACO.colors
@@ -927,7 +1183,7 @@ function ACO:InitUI()
     end
     UpdateViewButtons()
 
-    local ClearBlacklistBtn = CreateModernButton(ListSection, ACO:Translate("CLEAR_BLACKLIST_BTN"), 80, 22, false)
+    local ClearBlacklistBtn = CreateModernButton(ListSection, ACO:Translate("CLEAR_BLACKLIST_BTN"), 88, 26, false)
     ClearBlacklistBtn:SetPoint("LEFT", BlockedBtn, "RIGHT", 10, 0)
     ClearBlacklistBtn:SetScript("OnClick", function()
         StaticPopup_Show("ACO_CLEAR_BLACKLIST")
@@ -949,31 +1205,64 @@ function ACO:InitUI()
     end)
     ClearBlacklistBtn:Hide()
 
-    -- Move the search box to after the clear button
-    SearchBox:ClearAllPoints()
-    SearchBox:SetPoint("LEFT", ClearBlacklistBtn, "RIGHT", 10, 0)
-
     TrackedBtn:SetScript("OnClick", function()
         UI.listView = "tracked"
+        if ACO.db and ACO.db.ui then ACO.db.ui.listView = "tracked" end
         ClearBlacklistBtn:Hide()
         SearchBox:ClearAllPoints()
         SearchBox:SetPoint("LEFT", BlockedBtn, "RIGHT", 10, 0)
+        SearchBox:SetPoint("RIGHT", ListSection, "RIGHT", -PADDING, 0)
         UpdateViewButtons()
         UI:RefreshList()
     end)
     BlockedBtn:SetScript("OnClick", function()
         UI.listView = "blocked"
+        if ACO.db and ACO.db.ui then ACO.db.ui.listView = "blocked" end
         ClearBlacklistBtn:Show()
         SearchBox:ClearAllPoints()
         SearchBox:SetPoint("LEFT", ClearBlacklistBtn, "RIGHT", 10, 0)
+        SearchBox:SetPoint("RIGHT", ListSection, "RIGHT", -PADDING, 0)
         UpdateViewButtons()
         UI:RefreshList()
     end)
 
+    if UI.listView == "blocked" then
+        ClearBlacklistBtn:Show()
+        SearchBox:ClearAllPoints()
+        SearchBox:SetPoint("LEFT", ClearBlacklistBtn, "RIGHT", 10, 0)
+        SearchBox:SetPoint("RIGHT", ListSection, "RIGHT", -PADDING, 0)
+    else
+        ClearBlacklistBtn:Hide()
+        SearchBox:ClearAllPoints()
+        SearchBox:SetPoint("LEFT", BlockedBtn, "RIGHT", 10, 0)
+        SearchBox:SetPoint("RIGHT", ListSection, "RIGHT", -PADDING, 0)
+    end
+    UpdateViewButtons()
+
+    -- Column header keeps quantities and estimates out of the item-name area.
+    local ColumnHeader = CreateFrame("Frame", nil, ListSection, "BackdropTemplate")
+    ColumnHeader:SetHeight(20)
+    ColumnHeader:SetPoint("TOPLEFT", PADDING, -70)
+    ColumnHeader:SetPoint("TOPRIGHT", -PADDING - 20, -70)
+    ApplyBackdrop(ColumnHeader, C.bg, C.border)
+
+    local ContainerHeader = MakeText(ColumnHeader, ACO:Translate("LIST_COL_CONTAINER"), 9, C.textDim)
+    ContainerHeader:SetPoint("LEFT", 8, 0)
+
+    local ValueHeader = MakeText(ColumnHeader, ACO:Translate("LIST_COL_AVG_VALUE"), 9, C.textDim)
+    ValueHeader:SetWidth(90)
+    ValueHeader:SetPoint("RIGHT", -50, 0)
+    ValueHeader:SetJustifyH("RIGHT")
+
+    local CountHeader = MakeText(ColumnHeader, ACO:Translate("LIST_COL_IN_BAGS"), 9, C.textDim)
+    CountHeader:SetWidth(58)
+    CountHeader:SetPoint("RIGHT", ValueHeader, "LEFT", -10, 0)
+    CountHeader:SetJustifyH("RIGHT")
+
     -- Scroll frame
     local ScrollFrame = CreateFrame("ScrollFrame", nil, ListSection, "UIPanelScrollFrameTemplate")
-    ScrollFrame:SetPoint("TOPLEFT", PADDING, -65)
-    ScrollFrame:SetPoint("BOTTOMRIGHT", -PADDING - 20, PADDING)
+    ScrollFrame:SetPoint("TOPLEFT", PADDING, -94)
+    ScrollFrame:SetPoint("BOTTOMRIGHT", -PADDING - 20, 56)
 
     local ScrollChild = CreateFrame("Frame", nil, ScrollFrame)
     ScrollChild:SetSize(ScrollFrame:GetWidth(), 1)
@@ -981,6 +1270,177 @@ function ACO:InitUI()
 
     UI.scrollChild = ScrollChild
     UI.listItems = {}
+
+    -- ========================================================================
+    -- PER-CONTAINER RULE EDITOR (3.1)
+    -- ========================================================================
+
+    local RuleEditor
+    function UI:ShowRuleEditor(itemID)
+        itemID = tonumber(itemID)
+        if not itemID then return end
+
+        if not RuleEditor then
+            RuleEditor = CreateFrame("Frame", "ACORuleEditor", MainFrame, "BackdropTemplate")
+            RuleEditor:SetSize(500, 430)
+            RuleEditor:SetPoint("CENTER", MainFrame, "CENTER", 0, 0)
+            RuleEditor:SetFrameLevel(MainFrame:GetFrameLevel() + 40)
+            RuleEditor:EnableMouse(true)
+            RuleEditor:SetClampedToScreen(true)
+            ApplyBackdrop(RuleEditor, C.bg, C.accent)
+
+            local accent = RuleEditor:CreateTexture(nil, "OVERLAY")
+            accent:SetHeight(2)
+            accent:SetPoint("TOPLEFT", 1, -1)
+            accent:SetPoint("TOPRIGHT", -1, -1)
+            accent:SetColorTexture(C.accent.r, C.accent.g, C.accent.b, 1)
+
+            local title = MakeText(RuleEditor, ACO:Translate("RULES_TITLE"), 15, C.text)
+            title:SetPoint("TOPLEFT", 16, -14)
+            RuleEditor.title = title
+
+            local itemName = MakeText(RuleEditor, "", 11, C.accent)
+            itemName:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -5)
+            itemName:SetPoint("RIGHT", -46, 0)
+            itemName:SetJustifyH("LEFT")
+            RuleEditor.itemName = itemName
+
+            local close = CreateFrame("Button", nil, RuleEditor)
+            close:SetSize(20, 20)
+            close:SetPoint("TOPRIGHT", -12, -12)
+            local closeTex = close:CreateTexture(nil, "ARTWORK")
+            closeTex:SetAllPoints()
+            closeTex:SetAtlas("common-search-clearbutton", true)
+            close:SetScript("OnClick", function() RuleEditor:Hide() end)
+
+            local auto = CreateModernCheckbox(RuleEditor, ACO:Translate("RULES_AUTO_OPEN"), ACO:Translate("RULES_TOOLTIP"))
+            auto:SetPoint("TOPLEFT", 16, -66)
+            auto:SetPoint("RIGHT", RuleEditor, "RIGHT", -16, 0)
+            RuleEditor.auto = auto.checkbox
+
+            local function CreateRuleField(label, x, y, width, hint)
+                local frame = CreateFrame("Frame", nil, RuleEditor)
+                frame:SetSize(width, 54)
+                frame:SetPoint("TOPLEFT", x, y)
+                local labelText = MakeText(frame, label, 10, C.text)
+                labelText:SetPoint("TOPLEFT", 0, 0)
+                local edit = CreateFrame("EditBox", nil, frame, "BackdropTemplate")
+                edit:SetHeight(24)
+                edit:SetPoint("TOPLEFT", 0, -20)
+                edit:SetPoint("TOPRIGHT", 0, -20)
+                ApplyBackdrop(edit, C.row, C.border)
+                edit:SetFontObject("GameFontHighlightSmall")
+                edit:SetTextInsets(7, 7, 0, 0)
+                edit:SetAutoFocus(false)
+                edit:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+                edit:SetScript("OnEnterPressed", function(self) self:ClearFocus() end)
+                if hint then
+                    edit:SetScript("OnEnter", function(self)
+                        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+                        GameTooltip:SetText(hint, 1, 1, 1, 1, true)
+                        GameTooltip:Show()
+                    end)
+                    edit:SetScript("OnLeave", function() GameTooltip:Hide() end)
+                end
+                return edit
+            end
+
+            RuleEditor.delay = CreateRuleField(ACO:Translate("RULES_DELAY"), 16, -104, 220, ACO:Translate("RULES_DELAY_HINT"))
+            RuleEditor.maxSession = CreateRuleField(ACO:Translate("RULES_MAX_SESSION"), 264, -104, 220, ACO:Translate("RULES_MAX_SESSION_HINT"))
+            RuleEditor.priority = CreateRuleField(ACO:Translate("RULES_PRIORITY"), 16, -166, 220, ACO:Translate("RULES_PRIORITY_HINT"))
+            RuleEditor.tempBlock = CreateRuleField(ACO:Translate("RULES_TEMP_BLOCK"), 264, -166, 220, ACO:Translate("RULES_TEMP_BLOCK_HINT"))
+            RuleEditor.source = CreateRuleField(ACO:Translate("RULES_SOURCE"), 16, -228, 468, nil)
+
+            local noteLabel = MakeText(RuleEditor, ACO:Translate("RULES_NOTE"), 10, C.text)
+            noteLabel:SetPoint("TOPLEFT", 16, -290)
+            local noteBg = CreateFrame("Frame", nil, RuleEditor, "BackdropTemplate")
+            noteBg:SetPoint("TOPLEFT", 16, -310)
+            noteBg:SetPoint("TOPRIGHT", -16, -310)
+            noteBg:SetHeight(54)
+            ApplyBackdrop(noteBg, C.row, C.border)
+            local note = CreateFrame("EditBox", nil, noteBg)
+            note:SetMultiLine(true)
+            note:SetFontObject("GameFontHighlightSmall")
+            note:SetTextInsets(7, 7, 6, 6)
+            note:SetPoint("TOPLEFT", 0, 0)
+            note:SetPoint("BOTTOMRIGHT", 0, 0)
+            note:SetAutoFocus(false)
+            note:SetMaxLetters(240)
+            note:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+            RuleEditor.note = note
+
+            local diagnostic = MakeText(RuleEditor, "", 9, C.textDim)
+            diagnostic:SetPoint("BOTTOMLEFT", 16, 48)
+            diagnostic:SetPoint("RIGHT", -16, 0)
+            diagnostic:SetJustifyH("LEFT")
+            RuleEditor.diagnostic = diagnostic
+
+            local SaveBtn = CreateModernButton(RuleEditor, ACO:Translate("RULES_SAVE"), 104, 28, true)
+            SaveBtn:SetPoint("BOTTOMRIGHT", -16, 14)
+            local CancelBtn = CreateModernButton(RuleEditor, ACO:Translate("RULES_CANCEL"), 86, 28, false)
+            CancelBtn:SetPoint("RIGHT", SaveBtn, "LEFT", -8, 0)
+            local ResetBtn = CreateModernButton(RuleEditor, ACO:Translate("RULES_RESET"), 104, 28, false)
+            ResetBtn:SetPoint("BOTTOMLEFT", 16, 14)
+            local BlockBtn = CreateModernButton(RuleEditor, ACO:Translate("RULES_PERMANENT_BLOCK"), 128, 28, false)
+            BlockBtn:SetPoint("LEFT", ResetBtn, "RIGHT", 8, 0)
+
+            CancelBtn:SetScript("OnClick", function() RuleEditor:Hide() end)
+            SaveBtn:SetScript("OnClick", function()
+                local id = RuleEditor.currentItemID
+                if not id then return end
+                local delayText = RuleEditor.delay:GetText():match("^%s*(.-)%s*$")
+                local tempMinutes = max(0, tonumber(RuleEditor.tempBlock:GetText()) or 0)
+                local values = {
+                    autoOpen = RuleEditor.auto:GetChecked(),
+                    maxPerSession = tonumber(RuleEditor.maxSession:GetText()) or 0,
+                    priority = tonumber(RuleEditor.priority:GetText()) or 0,
+                    temporaryBlockUntil = tempMinutes > 0 and (time() + floor(tempMinutes * 60)) or 0,
+                    source = RuleEditor.source:GetText() or "",
+                    note = RuleEditor.note:GetText() or "",
+                }
+                if delayText == "" then values.clearDelay = true else values.delay = tonumber(delayText) end
+                ACO:SetContainerRule(id, values)
+                ACO:Print(ACO:Translate("RULES_SAVED", ACO:FormatItemLink(id)))
+                RuleEditor:Hide()
+            end)
+            ResetBtn:SetScript("OnClick", function()
+                local id = RuleEditor.currentItemID
+                if not id then return end
+                ACO:ResetContainerRule(id)
+                ACO:Print(ACO:Translate("RULES_RESET_DONE", ACO:FormatItemLink(id)))
+                RuleEditor:Hide()
+            end)
+            BlockBtn:SetScript("OnClick", function()
+                local id = RuleEditor.currentItemID
+                if not id then return end
+                ACO:AddToBlacklist(id)
+                ACO.db.containers[id] = nil
+                ACO.db.containerRules[id] = nil
+                RuleEditor:Hide()
+                UI:RefreshList()
+            end)
+            RuleEditor:Hide()
+        end
+
+        local rule = ACO:GetContainerRule(itemID, true)
+        RuleEditor.currentItemID = itemID
+        local itemLabel = C_Item.GetItemInfo(itemID) or ("Item:" .. tostring(itemID))
+        RuleEditor.itemName:SetText(itemLabel .. "  |cff777777(" .. tostring(itemID) .. ")|r")
+        RuleEditor.auto:SetChecked(rule.autoOpen ~= false)
+        RuleEditor.delay:SetText(rule.delay ~= nil and tostring(rule.delay) or "")
+        RuleEditor.maxSession:SetText(tostring(rule.maxPerSession or 0))
+        RuleEditor.priority:SetText(tostring(rule.priority or 0))
+        local remaining = max(0, (rule.temporaryBlockUntil or 0) - time())
+        RuleEditor.tempBlock:SetText(remaining > 0 and tostring(floor((remaining + 59) / 60)) or "0")
+        RuleEditor.source:SetText(rule.source or "")
+        RuleEditor.note:SetText(rule.note or "")
+        local stat = ACO:GetContainerDiagnostic(itemID, false) or { success = 0, failed = 0 }
+        local total = (stat.success or 0) + (stat.failed or 0)
+        local rate = total > 0 and floor((stat.success or 0) / total * 100 + 0.5) or 0
+        RuleEditor.diagnostic:SetText(format(ACO:Translate("RULES_DIAGNOSTIC_FORMAT"), stat.success or 0, stat.failed or 0, rate))
+        RuleEditor:Show()
+        RuleEditor:Raise()
+    end
 
     -- ========================================================================
     -- LIST ITEM CREATION
@@ -998,22 +1458,36 @@ function ACO:InitUI()
 
         -- Item icon
         local icon = item:CreateTexture(nil, "ARTWORK")
-        icon:SetSize(26, 26)
+        icon:SetSize(30, 30)
         icon:SetPoint("LEFT", 8, 0)
         icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
 
         -- Item name
         local name = MakeText(item, nil, 11, C.text, "LEFT")
-        name:SetPoint("LEFT", icon, "RIGHT", 10, 6)
-        name:SetWidth(180)
+        name:SetPoint("LEFT", icon, "RIGHT", 10, 7)
+        if name.SetWordWrap then name:SetWordWrap(false) end
+        if name.SetNonSpaceWrap then name:SetNonSpaceWrap(false) end
+        if name.SetMaxLines then name:SetMaxLines(1) end
 
         -- Item ID
         local idText = MakeText(item, format(ACO:Translate("ID_LABEL"), itemID), 9, C.textDim)
-        idText:SetPoint("LEFT", icon, "RIGHT", 10, -8)
+        idText:SetPoint("LEFT", icon, "RIGHT", 10, -9)
+        local itemRule = ACO:GetContainerRule(itemID, false)
+        local ruleTag
+        if itemRule.autoOpen == false then
+            ruleTag = ACO:Translate("RULES_TAG_DISABLED")
+        elseif (itemRule.temporaryBlockUntil or 0) > time() then
+            ruleTag = ACO:Translate("RULES_TAG_TEMP")
+        elseif (itemRule.maxPerSession or 0) > 0 and (ACO.sessionOpenCounts[itemID] or 0) >= itemRule.maxPerSession then
+            ruleTag = ACO:Translate("RULES_TAG_LIMIT")
+        end
+        if ruleTag then
+            idText:SetText(format(ACO:Translate("ID_LABEL"), itemID) .. "  |cffffaa00· " .. ruleTag .. "|r")
+        end
 
         -- Remove button
         local removeBtn = CreateFrame("Button", nil, item, "BackdropTemplate")
-        removeBtn:SetSize(22, 22)
+        removeBtn:SetSize(24, 24)
         removeBtn:SetPoint("RIGHT", -8, 0)
         ApplyBackdrop(removeBtn, { r = C.red.r * 0.2, g = C.red.g * 0.2, b = C.red.b * 0.2, a = 0.8 }, C.border)
 
@@ -1040,16 +1514,60 @@ function ACO:InitUI()
             ACO:RemoveContainer(itemID)
         end)
 
+        -- Per-container rule button
+        local ruleBtn = CreateFrame("Button", nil, item, "BackdropTemplate")
+        ruleBtn:SetSize(24, 24)
+        ruleBtn:SetPoint("RIGHT", removeBtn, "LEFT", -6, 0)
+        ApplyBackdrop(ruleBtn, C.row, C.border)
+        local ruleIcon = ruleBtn:CreateTexture(nil, "ARTWORK")
+        ruleIcon:SetSize(16, 16)
+        ruleIcon:SetPoint("CENTER")
+        ruleIcon:SetTexture("Interface\\Buttons\\UI-OptionsButton")
+        ruleBtn:SetScript("OnClick", function() UI:ShowRuleEditor(itemID) end)
+        ruleBtn:SetScript("OnEnter", function(self)
+            self:SetBackdropColor(C.rowHover.r, C.rowHover.g, C.rowHover.b, 1)
+            self:SetBackdropBorderColor(C.accent.r, C.accent.g, C.accent.b, 1)
+            GameTooltip:SetOwner(self, "ANCHOR_TOP")
+            GameTooltip:SetText(ACO:Translate("RULES_TOOLTIP"), 1, 1, 1, 1, true)
+            GameTooltip:Show()
+        end)
+        ruleBtn:SetScript("OnLeave", function(self)
+            self:SetBackdropColor(C.row.r, C.row.g, C.row.b, C.row.a)
+            self:SetBackdropBorderColor(C.border.r, C.border.g, C.border.b, 1)
+            GameTooltip:Hide()
+        end)
+
         -- ROI chip: shows average value per open from loot history
         local roiText = MakeText(item, "", 9, C.gold)
-        roiText:SetPoint("RIGHT", removeBtn, "LEFT", -6, 0)
+        roiText:SetPoint("RIGHT", ruleBtn, "LEFT", -8, 0)
         roiText:SetWidth(90)
         roiText:SetJustifyH("RIGHT")
 
         local roi = ACO:GetContainerAvgValue(itemID)
         if roi and roi.avgTotal > 0 then
             roiText:SetText(format(ACO:Translate("ROI_AVG"), ACO:FormatMoneyShort(roi.avgTotal)))
+        else
+            roiText:SetText("—")
+            roiText:SetTextColor(C.textDim.r, C.textDim.g, C.textDim.b)
         end
+
+        local countText = MakeText(item, "", 12, C.accent)
+        countText:SetPoint("RIGHT", roiText, "LEFT", -10, 0)
+        countText:SetWidth(58)
+        countText:SetJustifyH("RIGHT")
+        local bagCount = ACO:CountItemInBags(itemID)
+        countText:SetText(bagCount > 0 and ("x" .. bagCount) or "—")
+        if bagCount > 0 then
+            countText:SetTextColor(C.green.r, C.green.g, C.green.b)
+            icon:SetAlpha(1)
+        else
+            countText:SetTextColor(C.textDim.r, C.textDim.g, C.textDim.b)
+            icon:SetAlpha(0.55)
+        end
+
+        name:SetPoint("RIGHT", countText, "LEFT", -12, 7)
+        idText:SetPoint("RIGHT", countText, "LEFT", -12, -9)
+        idText:SetJustifyH("LEFT")
 
         -- Load item info
         local itemInfo = C_Item.GetItemInfo(itemID)
@@ -1125,16 +1643,19 @@ function ACO:InitUI()
         item._isAlt = isAlt
 
         local icon = item:CreateTexture(nil, "ARTWORK")
-        icon:SetSize(26, 26)
+        icon:SetSize(30, 30)
         icon:SetPoint("LEFT", 8, 0)
         icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
 
         local name = MakeText(item, nil, 11, C.text, "LEFT")
-        name:SetPoint("LEFT", icon, "RIGHT", 10, 6)
-        name:SetWidth(240)
+        name:SetPoint("LEFT", icon, "RIGHT", 10, 7)
+        name:SetPoint("RIGHT", -48, 7)
+        if name.SetWordWrap then name:SetWordWrap(false) end
+        if name.SetNonSpaceWrap then name:SetNonSpaceWrap(false) end
+        if name.SetMaxLines then name:SetMaxLines(1) end
 
         local idText = MakeText(item, format(ACO:Translate("ID_LABEL"), itemID), 9, C.textDim)
-        idText:SetPoint("LEFT", icon, "RIGHT", 10, -8)
+        idText:SetPoint("LEFT", icon, "RIGHT", 10, -9)
 
         -- "Auto-blocked" tag
         local tag = MakeText(item, "|cffff6666[Auto]|r", 9, C.text)
@@ -1142,7 +1663,7 @@ function ACO:InitUI()
 
         -- Unblock button
         local unblockBtn = CreateFrame("Button", nil, item, "BackdropTemplate")
-        unblockBtn:SetSize(22, 22)
+        unblockBtn:SetSize(24, 24)
         unblockBtn:SetPoint("RIGHT", -8, 0)
         ApplyBackdrop(unblockBtn, { r = 0.1, g = 0.3, b = 0.1, a = 0.8 }, C.border)
 
@@ -1218,8 +1739,20 @@ function ACO:InitUI()
         local source = isBlocked and ACO.db.blacklist or ACO.db.containers
         local filter = self.searchFilterText or ""
 
-        local index = 1
+        local ids = {}
         for itemID in pairs(source) do
+            tinsert(ids, tonumber(itemID) or itemID)
+        end
+        table.sort(ids, function(a, b)
+            local nameA = C_Item.GetItemInfo(a) or tostring(a)
+            local nameB = C_Item.GetItemInfo(b) or tostring(b)
+            nameA, nameB = nameA:lower(), nameB:lower()
+            if nameA == nameB then return tonumber(a) < tonumber(b) end
+            return nameA < nameB
+        end)
+
+        local index = 1
+        for _, itemID in ipairs(ids) do
             local show = true
             if filter ~= "" then
                 local idStr = tostring(itemID)
@@ -1231,7 +1764,7 @@ function ACO:InitUI()
 
             if show then
                 local listItem = isBlocked and CreateBlacklistItem(itemID, index) or CreateListItem(itemID, index)
-                table.insert(self.listItems, listItem)
+                tinsert(self.listItems, listItem)
                 index = index + 1
             end
         end
@@ -1240,8 +1773,7 @@ function ACO:InitUI()
 
         local count = index - 1
         if isBlocked then
-            local s = count > 1 and "s" or ""
-            self.listCount:SetText(count .. " bloqué" .. s)
+            self.listCount:SetText(format(ACO:Translate("LIST_BLOCKED_COUNT"), count))
         else
             local suffix = count > 1 and "s" or ""
             self.listCount:SetText(ACO:Translate("LIST_COUNT", count, suffix))
@@ -1249,23 +1781,65 @@ function ACO:InitUI()
     end
 
     -- ========================================================================
-    -- PENDING TAB CONTENT
+    -- PENDING / QUEUE CENTER TAB (3.1)
     -- ========================================================================
 
     local PendingSection = CreateFrame("Frame", nil, PendingContent, "BackdropTemplate")
     PendingSection:SetPoint("TOPLEFT", PADDING, -PADDING)
-    PendingSection:SetPoint("TOPRIGHT", -PADDING, -PADDING)
-    PendingSection:SetPoint("BOTTOMLEFT", PADDING, PADDING)
+    PendingSection:SetPoint("BOTTOMRIGHT", -PADDING, PADDING)
     ApplyBackdrop(PendingSection, C.row, C.border)
 
-    local PendingTitle = MakeText(PendingSection, ACO:Translate("PENDING_TITLE"), 14, C.text)
+    local PendingTitle = MakeText(PendingSection, ACO:Translate("QUEUE_CENTER_TITLE"), 14, C.text)
     PendingTitle:SetPoint("TOPLEFT", PADDING, -PADDING)
 
-    local PendingHint = MakeText(PendingSection, ACO:Translate("PENDING_HINT"), 10, C.textDim)
+    local PendingHint = MakeText(PendingSection, ACO:Translate("QUEUE_CENTER_HINT"), 10, C.textDim)
     PendingHint:SetPoint("TOPLEFT", PendingTitle, "BOTTOMLEFT", 0, -4)
+    PendingHint:SetPoint("RIGHT", PendingSection, "RIGHT", -PADDING, 0)
+    PendingHint:SetJustifyH("LEFT")
+
+    local ModeAutoBtn = CreateModernButton(PendingSection, ACO:Translate("QUEUE_MODE_AUTO"), 96, 26, true)
+    ModeAutoBtn:SetPoint("TOPLEFT", PADDING, -52)
+    local ModeAssistedBtn = CreateModernButton(PendingSection, ACO:Translate("QUEUE_MODE_ASSISTED"), 96, 26, false)
+    ModeAssistedBtn:SetPoint("LEFT", ModeAutoBtn, "RIGHT", 6, 0)
+
+    local PauseQueueBtn = CreateModernButton(PendingSection, ACO:Translate("QUEUE_PAUSE"), 84, 26, false)
+    PauseQueueBtn:SetPoint("LEFT", ModeAssistedBtn, "RIGHT", 14, 0)
+
+    local OpenNextBtn = CreateModernButton(PendingSection, ACO:Translate("QUEUE_OPEN_NEXT"), 116, 26, true)
+    OpenNextBtn:SetPoint("LEFT", PauseQueueBtn, "RIGHT", 6, 0)
+
+    local AssistedOpenBtn = CreateFrame("Button", "ACOAssistedOpenButton", PendingSection, "SecureActionButtonTemplate,BackdropTemplate")
+    AssistedOpenBtn:SetSize(136, 26)
+    AssistedOpenBtn:SetPoint("LEFT", PauseQueueBtn, "RIGHT", 6, 0)
+    AssistedOpenBtn:RegisterForClicks("LeftButtonUp")
+    ApplyBackdrop(AssistedOpenBtn, { r = C.accent.r * 0.30, g = C.accent.g * 0.30, b = C.accent.b * 0.30, a = 0.95 }, C.accent)
+    local AssistedOpenText = MakeText(AssistedOpenBtn, ACO:Translate("QUEUE_OPEN_NEXT"), 11, C.text)
+    AssistedOpenText:SetPoint("CENTER")
+    AssistedOpenBtn.text = AssistedOpenText
+    AssistedOpenBtn:Hide()
+
+    local ClearQueueBtn = CreateModernButton(PendingSection, ACO:Translate("QUEUE_CLEAR"), 96, 26, false)
+    ClearQueueBtn:SetPoint("TOPRIGHT", -PADDING, -52)
+    local ClearFailuresBtn = CreateModernButton(PendingSection, ACO:Translate("QUEUE_CLEAR_FAILURES"), 110, 26, false)
+    ClearFailuresBtn:SetPoint("RIGHT", ClearQueueBtn, "LEFT", -6, 0)
+
+    local QueueStatusText = MakeText(PendingSection, "", 10, C.textDim)
+    QueueStatusText:SetPoint("TOPLEFT", PADDING, -84)
+    QueueStatusText:SetPoint("RIGHT", PendingSection, "RIGHT", -PADDING, 0)
+    QueueStatusText:SetJustifyH("LEFT")
+
+    local PendingHeader = CreateFrame("Frame", nil, PendingSection, "BackdropTemplate")
+    PendingHeader:SetHeight(20)
+    PendingHeader:SetPoint("TOPLEFT", PADDING, -104)
+    PendingHeader:SetPoint("TOPRIGHT", -PADDING - 20, -104)
+    ApplyBackdrop(PendingHeader, C.bg, C.border)
+    local PendingHeaderName = MakeText(PendingHeader, ACO:Translate("LIST_COL_CONTAINER"), 9, C.textDim)
+    PendingHeaderName:SetPoint("LEFT", 10, 0)
+    local PendingHeaderStatus = MakeText(PendingHeader, ACO:Translate("QUEUE_STATUS_QUEUED"), 9, C.textDim)
+    PendingHeaderStatus:SetPoint("RIGHT", -118, 0)
 
     local PendingScroll = CreateFrame("ScrollFrame", nil, PendingSection, "UIPanelScrollFrameTemplate")
-    PendingScroll:SetPoint("TOPLEFT", PADDING, -55)
+    PendingScroll:SetPoint("TOPLEFT", PADDING, -128)
     PendingScroll:SetPoint("BOTTOMRIGHT", -PADDING - 20, PADDING)
 
     local PendingScrollChild = CreateFrame("Frame", nil, PendingScroll)
@@ -1273,63 +1847,193 @@ function ACO:InitUI()
     PendingScroll:SetScrollChild(PendingScrollChild)
 
     UI.pendingListItems = {}
+    UI.assistedButtons = UI.assistedButtons or {}
+    tinsert(UI.assistedButtons, AssistedOpenBtn)
+
+    local function GetQueueStatusPresentation(status)
+        local labels = {
+            QUEUED = "QUEUE_STATUS_QUEUED",
+            DELAY = "QUEUE_STATUS_DELAY",
+            BLOCKED = "QUEUE_STATUS_BLOCKED",
+            OPENING = "QUEUE_STATUS_OPENING",
+            VERIFYING = "QUEUE_STATUS_VERIFYING",
+            RETRYING = "QUEUE_STATUS_RETRYING",
+            FAILED = "QUEUE_STATUS_FAILED",
+            PAUSED = "QUEUE_STATUS_PAUSED",
+            ASSISTED_READY = "QUEUE_STATUS_ASSISTED_READY",
+            DONE = "QUEUE_STATUS_DONE",
+        }
+        local colors = {
+            QUEUED = C.accent,
+            DELAY = C.textDim,
+            BLOCKED = C.red,
+            OPENING = C.green,
+            VERIFYING = C.gold,
+            RETRYING = C.orange,
+            FAILED = C.red,
+            PAUSED = C.orange,
+            ASSISTED_READY = C.green,
+            DONE = C.green,
+        }
+        return ACO:Translate(labels[status] or "QUEUE_STATUS_QUEUED"), colors[status] or C.text
+    end
+
+    function UI:ConfigureAssistedButtons(entry)
+        if not self.assistedButtons then return end
+        for _, button in ipairs(self.assistedButtons) do
+            if InCombatLockdown and InCombatLockdown() then
+                button:Disable()
+                button:SetAlpha(0.45)
+            elseif entry and entry.itemID then
+                button._acoQueueID = entry.queueID
+                button:SetAttribute("type", "item")
+                button:SetAttribute("item", "item:" .. tostring(entry.itemID))
+                button:SetAttribute("macrotext", nil)
+                button:Enable()
+                button:SetAlpha(1)
+                if button.text then button.text:SetText(ACO:Translate("QUEUE_OPEN_NEXT")) end
+            else
+                button._acoQueueID = nil
+                button:SetAttribute("type", nil)
+                button:SetAttribute("item", nil)
+                button:SetAttribute("macrotext", nil)
+                button:Disable()
+                button:SetAlpha(0.45)
+                if button.text then button.text:SetText(ACO:Translate("QUEUE_OPEN_NEXT")) end
+            end
+        end
+    end
+
+    AssistedOpenBtn:SetScript("OnMouseDown", function(self, button)
+        if button == "LeftButton" then
+            self._acoPrepared = self._acoQueueID and ACO:PrepareAssistedClick(self._acoQueueID) or false
+        end
+    end)
+    AssistedOpenBtn:SetScript("PostClick", function(self)
+        local queueID = self._acoQueueID
+        self:Disable()
+        self:SetAlpha(0.45)
+        if queueID and self._acoPrepared then
+            C_Timer.After(0, function() ACO:CompleteAssistedClick(queueID) end)
+        end
+        self._acoPrepared = nil
+    end)
+    AssistedOpenBtn:SetScript("OnEnter", function(self)
+        self:SetBackdropColor(C.accent.r * 0.45, C.accent.g * 0.45, C.accent.b * 0.45, 1)
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:SetText(ACO:Translate("QUEUE_ASSISTED_HELP"), 1, 1, 1, 1, true)
+        GameTooltip:Show()
+    end)
+    AssistedOpenBtn:SetScript("OnLeave", function(self)
+        self:SetBackdropColor(C.accent.r * 0.30, C.accent.g * 0.30, C.accent.b * 0.30, 0.95)
+        GameTooltip:Hide()
+    end)
+
+    function UI:UpdateQueueModeControls()
+        local assisted = ACO:GetQueueMode() == "assisted"
+        if assisted then
+            ModeAssistedBtn:SetBackdropColor(C.accent.r * 0.25, C.accent.g * 0.25, C.accent.b * 0.25, 0.9)
+            ModeAssistedBtn:SetBackdropBorderColor(C.accent.r, C.accent.g, C.accent.b, 1)
+            ModeAutoBtn:SetBackdropColor(C.row.r, C.row.g, C.row.b, C.row.a)
+            ModeAutoBtn:SetBackdropBorderColor(C.border.r, C.border.g, C.border.b, 1)
+            OpenNextBtn:Hide()
+            AssistedOpenBtn:Show()
+            self:ConfigureAssistedButtons(ACO.assistedEntry)
+        else
+            ModeAutoBtn:SetBackdropColor(C.accent.r * 0.25, C.accent.g * 0.25, C.accent.b * 0.25, 0.9)
+            ModeAutoBtn:SetBackdropBorderColor(C.accent.r, C.accent.g, C.accent.b, 1)
+            ModeAssistedBtn:SetBackdropColor(C.row.r, C.row.g, C.row.b, C.row.a)
+            ModeAssistedBtn:SetBackdropBorderColor(C.border.r, C.border.g, C.border.b, 1)
+            AssistedOpenBtn:Hide()
+            OpenNextBtn:Show()
+        end
+        PauseQueueBtn.text:SetText(ACO.queuePaused and ACO:Translate("QUEUE_RESUME") or ACO:Translate("QUEUE_PAUSE"))
+    end
+
+    ModeAutoBtn:SetScript("OnClick", function() ACO:SetQueueMode("auto") end)
+    ModeAssistedBtn:SetScript("OnClick", function() ACO:SetQueueMode("assisted") end)
+    ModeAutoBtn:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:SetText(ACO:Translate("QUEUE_MODE_AUTO_TIP"), 1, 1, 1, 1, true)
+        GameTooltip:Show()
+    end)
+    ModeAutoBtn:SetScript("OnLeave", function() GameTooltip:Hide() UI:UpdateQueueModeControls() end)
+    ModeAssistedBtn:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:SetText(ACO:Translate("QUEUE_MODE_ASSISTED_TIP"), 1, 1, 1, 1, true)
+        GameTooltip:Show()
+    end)
+    ModeAssistedBtn:SetScript("OnLeave", function() GameTooltip:Hide() UI:UpdateQueueModeControls() end)
+
+    PauseQueueBtn:SetScript("OnClick", function()
+        if ACO.queuePaused then ACO:ResumeQueue() else ACO:PauseQueue() end
+        UI:UpdateQueueModeControls()
+    end)
+    OpenNextBtn:SetScript("OnClick", function() ACO:OpenNextQueueEntry() end)
+    ClearQueueBtn:SetScript("OnClick", function() ACO:CancelQueue(false) end)
+    ClearFailuresBtn:SetScript("OnClick", function() ACO:ClearQueueFailures() end)
 
     local function CreatePendingItem(entry, index)
-        local item = CreateFrame("Button", nil, PendingScrollChild, "BackdropTemplate")
-        item:EnableMouse(true)
-        if item.RegisterForClicks then
-            item:RegisterForClicks("RightButtonUp")
-        end
-        item:SetSize(PendingScroll:GetWidth() - 10, LIST_ITEM_HEIGHT)
-        item:SetPoint("TOPLEFT", 0, -(index - 1) * (LIST_ITEM_HEIGHT + 3))
+        local rowHeight = 58
+        local item = CreateFrame("Frame", nil, PendingScrollChild, "BackdropTemplate")
+        item:SetHeight(rowHeight)
+        item:SetPoint("TOPLEFT", 0, -(index - 1) * (rowHeight + 3))
+        item:SetPoint("TOPRIGHT", -8, -(index - 1) * (rowHeight + 3))
 
-        local isAlt = (index % 2 == 0)
-        local rowBg = isAlt and C.rowAlt or C.row
-        ApplyBackdrop(item, rowBg, C.border)
+        local isAlt = index % 2 == 0
+        ApplyBackdrop(item, isAlt and C.rowAlt or C.row, C.border)
         item._isAlt = isAlt
 
         local icon = item:CreateTexture(nil, "ARTWORK")
-        icon:SetSize(26, 26)
-        icon:SetPoint("LEFT", 8, 0)
+        icon:SetSize(34, 34)
+        icon:SetPoint("LEFT", 9, 0)
         icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
-
-        local name = MakeText(item, nil, 11, C.text, "LEFT")
-        name:SetPoint("LEFT", icon, "RIGHT", 10, 0)
-        name:SetWidth(320)
-
-        local countText = MakeText(item, nil, 10, C.textDim)
-        countText:SetPoint("RIGHT", -10, 0)
+        icon:SetTexture((C_Item.GetItemIconByID and C_Item.GetItemIconByID(entry.itemID)) or "Interface\\Icons\\INV_Misc_QuestionMark")
 
         local link = entry.link or ACO:FormatItemLink(entry.itemID)
-        item._acoLink = link
-        local itemName = link:match("%[(.-)%]") or ("Item:" .. tostring(entry.itemID))
-        name:SetText(itemName)
-        countText:SetText("x" .. tostring(entry.count or 1))
+        local itemName = link and link:match("%[(.-)%]")
+        if not itemName and C_Item.GetItemNameByID then itemName = C_Item.GetItemNameByID(entry.itemID) end
 
-        local texture = C_Item.GetItemIconByID and C_Item.GetItemIconByID(entry.itemID)
-        if texture then icon:SetTexture(texture) end
+        local name = MakeText(item, itemName or ("Item:" .. tostring(entry.itemID)), 11, C.text, "LEFT")
+        name:SetPoint("TOPLEFT", icon, "TOPRIGHT", 10, -4)
+        name:SetPoint("RIGHT", item, "RIGHT", -230, 0)
+        if name.SetWordWrap then name:SetWordWrap(false) end
+        if name.SetMaxLines then name:SetMaxLines(1) end
 
-        item:SetScript("OnClick", function(self, button)
-            if button ~= "RightButton" then
-                return
-            end
-            local ok, reason = ACO:UseContainerFromBagSlot(entry.itemID, entry.bag, entry.slot, entry.link)
-            if not ok then
-                local link2 = entry.link or ACO:FormatItemLink(entry.itemID)
-                ACO:Print(ACO:Translate("CANNOT_OPEN_AUTO") .. " " .. tostring(link2) .. (reason and (" ("..tostring(reason)..")") or ""))
-            end
-            C_Timer.After(0.15, function()
-                if UI and UI.RefreshPendingList then
-                    UI:RefreshPendingList()
-                end
-            end)
-        end)
+        local statusLabel, statusColor = GetQueueStatusPresentation(entry.status)
+        local eta = entry.eta and entry.eta > 0.05 and format("%.1fs", entry.eta) or "—"
+        local detail = MakeText(item, format(ACO:Translate("QUEUE_STATUS_FORMAT"), statusLabel, entry.attempt or 0, eta), 9, C.textDim, "LEFT")
+        detail:SetPoint("BOTTOMLEFT", icon, "BOTTOMRIGHT", 10, 4)
+        detail:SetPoint("RIGHT", item, "RIGHT", -230, 0)
+        if entry.reason then
+            detail:SetText(detail:GetText() .. " · " .. ACO:GetQueueReasonText(entry.reason))
+        end
+
+        local status = MakeText(item, statusLabel, 10, statusColor, "RIGHT")
+        status:SetWidth(102)
+        status:SetPoint("RIGHT", item, "RIGHT", -112, 0)
+
+        local removeBtn = CreateModernButton(item, ACO:Translate("QUEUE_REMOVE"), 74, 24, false)
+        removeBtn:SetPoint("RIGHT", -8, 0)
+        removeBtn:SetScript("OnClick", function() ACO:RemoveQueueEntry(entry.queueID) end)
+        if entry.active then
+            removeBtn:Disable()
+            removeBtn:SetAlpha(0.4)
+        end
+
+        if entry.failed then
+            local retryBtn = CreateModernButton(item, ACO:Translate("QUEUE_RETRY"), 72, 24, true)
+            retryBtn:SetPoint("RIGHT", removeBtn, "LEFT", -6, 0)
+            retryBtn:SetScript("OnClick", function() ACO:RetryFailedQueueEntry(entry.queueID) end)
+            status:ClearAllPoints()
+            status:SetPoint("RIGHT", retryBtn, "LEFT", -8, 0)
+        end
 
         item:SetScript("OnEnter", function(self)
             self:SetBackdropColor(C.rowHover.r, C.rowHover.g, C.rowHover.b, C.rowHover.a)
             self:SetBackdropBorderColor(C.borderLight.r, C.borderLight.g, C.borderLight.b, 1)
             GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-            GameTooltip:SetHyperlink(self._acoLink)
+            GameTooltip:SetHyperlink("item:" .. tostring(entry.itemID))
             GameTooltip:Show()
         end)
         item:SetScript("OnLeave", function(self)
@@ -1338,9 +2042,12 @@ function ACO:InitUI()
             self:SetBackdropBorderColor(C.border.r, C.border.g, C.border.b, 1)
             GameTooltip:Hide()
         end)
-
         return item
     end
+
+    local EmptyQueueText = MakeText(PendingScrollChild, ACO:Translate("QUEUE_EMPTY"), 11, C.textDim)
+    EmptyQueueText:SetPoint("TOP", PendingScrollChild, "TOP", 0, -24)
+    EmptyQueueText:Hide()
 
     function UI:RefreshPendingList()
         if not PendingContent or not PendingContent:IsShown() then return end
@@ -1354,16 +2061,44 @@ function ACO:InitUI()
             self.pendingListItems = {}
         end
 
-        local pending = ACO:GetPendingContainersInBags()
+        local snapshot = ACO:GetQueueSnapshot()
         local index = 1
-        for _, e in ipairs(pending) do
-            local listItem = CreatePendingItem(e, index)
-            table.insert(self.pendingListItems, listItem)
+        for _, entry in ipairs(snapshot) do
+            local listItem = CreatePendingItem(entry, index)
+            tinsert(self.pendingListItems, listItem)
             index = index + 1
         end
+        local count = index - 1
+        EmptyQueueText:SetShown(count == 0)
+        PendingScrollChild:SetHeight(max(1, count * 61))
 
-        PendingScrollChild:SetHeight(max(1, (index - 1) * (LIST_ITEM_HEIGHT + 3)))
+        local blocked, reason = ACO:IsOpeningBlocked()
+        local modeText = ACO:GetQueueMode() == "assisted" and ACO:Translate("QUEUE_MODE_ASSISTED") or ACO:Translate("QUEUE_MODE_AUTO")
+        if ACO.queuePaused then
+            QueueStatusText:SetText(modeText .. " · " .. ACO:Translate("QUEUE_STATUS_PAUSED"))
+            QueueStatusText:SetTextColor(C.orange.r, C.orange.g, C.orange.b)
+        elseif blocked then
+            QueueStatusText:SetText(modeText .. " · " .. ACO:Translate("QUEUE_STATUS_BLOCKED") .. ": " .. ACO:GetBlockReasonText(reason))
+            QueueStatusText:SetTextColor(C.red.r, C.red.g, C.red.b)
+        elseif ACO.assistedEntry then
+            QueueStatusText:SetText(modeText .. " · " .. ACO:Translate("QUEUE_ASSISTED_HELP"))
+            QueueStatusText:SetTextColor(C.green.r, C.green.g, C.green.b)
+        else
+            QueueStatusText:SetText(modeText .. " · " .. tostring(#ACO.openQueue) .. " + " .. tostring(ACO.pendingVerifications or 0))
+            QueueStatusText:SetTextColor(C.textDim.r, C.textDim.g, C.textDim.b)
+        end
+        self:UpdateQueueModeControls()
     end
+
+    local pendingRefreshElapsed = 0
+    PendingContent:SetScript("OnUpdate", function(_, elapsed)
+        pendingRefreshElapsed = pendingRefreshElapsed + elapsed
+        if pendingRefreshElapsed >= 0.75 then
+            pendingRefreshElapsed = 0
+            UI:RefreshPendingList()
+        end
+    end)
+    UI:UpdateQueueModeControls()
 
     -- ========================================================================
     -- STATISTICS TAB CONTENT
@@ -2018,6 +2753,7 @@ function ACO:InitUI()
             MainFrame:Show()
             PlaySound(SOUNDKIT.IG_MAINMENU_OPEN)
             self:SwitchTab(self.currentTab or "containers")
+            self:RefreshKPI()
         end
     end
 
@@ -2025,6 +2761,7 @@ function ACO:InitUI()
         MainFrame:Show()
         PlaySound(SOUNDKIT.IG_MAINMENU_OPEN)
         self:SwitchTab(self.currentTab or "containers")
+        self:RefreshKPI()
     end
 
     function UI:Hide()
@@ -2049,12 +2786,21 @@ function ACO:InitUI()
 
     UI.mainFrame = MainFrame
 
+    MainFrame:HookScript("OnHide", SaveFrameState)
+    UI.kpiTicker = C_Timer.NewTicker(0.5, function()
+        if MainFrame:IsShown() then
+            UI:RefreshKPI()
+        end
+    end)
+
     -- ESC to close
     table.insert(UISpecialFrames, "AutoChestOpenerFrame")
 
     -- Initial refresh
     C_Timer.After(0.2, function()
+        UI:SwitchTab(UI.currentTab or "containers")
         UI:RefreshList()
+        UI:RefreshKPI()
     end)
 
     -- ========================================================================
@@ -2293,6 +3039,44 @@ function ACO:InitUI()
         GameTooltip:Hide()
     end)
 
+    -- Assisted mode uses a real visible SecureActionButton. It replaces the
+    -- progress bar while a protected item is waiting for a hardware click.
+    local qwAssistedBtn = CreateFrame("Button", "ACOQueueAssistedOpenButton", QueueWidget, "SecureActionButtonTemplate,BackdropTemplate")
+    qwAssistedBtn:SetHeight(26)
+    qwAssistedBtn:SetPoint("BOTTOMLEFT", 10, 8)
+    qwAssistedBtn:SetPoint("BOTTOMRIGHT", -10, 8)
+    qwAssistedBtn:RegisterForClicks("LeftButtonUp")
+    ApplyBackdrop(qwAssistedBtn, { r = C.accent.r * 0.30, g = C.accent.g * 0.30, b = C.accent.b * 0.30, a = 0.95 }, C.accent)
+    local qwAssistedText = MakeText(qwAssistedBtn, ACO:Translate("QUEUE_OPEN_NEXT"), 11, C.text)
+    qwAssistedText:SetPoint("CENTER")
+    qwAssistedBtn.text = qwAssistedText
+    qwAssistedBtn:Hide()
+    UI.assistedButtons = UI.assistedButtons or {}
+    tinsert(UI.assistedButtons, qwAssistedBtn)
+
+    qwAssistedBtn:SetScript("OnMouseDown", function(self, button)
+        if button == "LeftButton" then
+            self._acoPrepared = self._acoQueueID and ACO:PrepareAssistedClick(self._acoQueueID) or false
+        end
+    end)
+    qwAssistedBtn:SetScript("PostClick", function(self)
+        local queueID = self._acoQueueID
+        self:Disable()
+        self:SetAlpha(0.45)
+        if queueID and self._acoPrepared then C_Timer.After(0, function() ACO:CompleteAssistedClick(queueID) end) end
+        self._acoPrepared = nil
+    end)
+    qwAssistedBtn:SetScript("OnEnter", function(self)
+        self:SetBackdropColor(C.accent.r * 0.45, C.accent.g * 0.45, C.accent.b * 0.45, 1)
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:SetText(ACO:Translate("QUEUE_ASSISTED_HELP"), 1, 1, 1, 1, true)
+        GameTooltip:Show()
+    end)
+    qwAssistedBtn:SetScript("OnLeave", function(self)
+        self:SetBackdropColor(C.accent.r * 0.30, C.accent.g * 0.30, C.accent.b * 0.30, 0.95)
+        GameTooltip:Hide()
+    end)
+
     -- Track initial queue size
     QueueWidget._initialTotal = 0
     QueueWidget._hideAt = 0
@@ -2311,6 +3095,15 @@ function ACO:InitUI()
 
         local now = GetTime()
         local queueSize = #ACO.openQueue
+        local assistedMode = ACO:GetQueueMode() == "assisted"
+        if assistedMode then
+            qwBarBg:Hide()
+            qwAssistedBtn:Show()
+            if UI.ConfigureAssistedButtons then UI:ConfigureAssistedButtons(ACO.assistedEntry) end
+        else
+            qwAssistedBtn:Hide()
+            qwBarBg:Show()
+        end
 
         -- Queue empty: show 100% briefly before hiding
         if queueSize == 0 then
@@ -2352,11 +3145,14 @@ function ACO:InitUI()
             if ACO.queuePaused then
                 qwTimer:SetText(ACO:Translate("QUEUE_PAUSED"))
                 qwTimer:SetTextColor(C.orange.r, C.orange.g, C.orange.b)
+            elseif assistedMode and ACO.assistedEntry and ACO.assistedEntry.queueID == entry.queueID then
+                qwTimer:SetText(ACO:Translate("QUEUE_STATUS_ASSISTED_READY"))
+                qwTimer:SetTextColor(C.green.r, C.green.g, C.green.b)
             elseif waitTime > 0.1 then
                 qwTimer:SetText(format("%.1fs", waitTime))
                 qwTimer:SetTextColor(C.accent.r, C.accent.g, C.accent.b)
             else
-                qwTimer:SetText(ACO:Translate("QUEUE_OPENING"))
+                qwTimer:SetText(assistedMode and ACO:Translate("QUEUE_STATUS_QUEUED") or ACO:Translate("QUEUE_OPENING"))
                 qwTimer:SetTextColor(C.green.r, C.green.g, C.green.b)
             end
         end

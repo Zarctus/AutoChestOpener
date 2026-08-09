@@ -1,10 +1,10 @@
-## Interface: 120005
+## Interface: 120007
 ## Title: |cff00ccffAuto Chest Opener|r
 ## Notes: Automatically opens all types of containers, chests, bags, crates, lockboxes, gifts, and more
 ## Notes-frFR: Ouvre automatiquement tous types de conteneurs, coffres, sacs, caisses, boîtes, cadeaux, etc.
 ## Author: Zarctus
 ## Category: Inventory
-## Version: 2.2.4
+## Version: 3.1.0
 ## SavedVariables: AutoChestOpenerDB
 ## IconTexture: Interface\AddOns\AutoChestOpener\textures\treasure.tga
 ## X-Category: Inventory

@@ -9,3 +9,5 @@ ignore:
   - .gitignore
   - curse.md
   - README.md
+  - ROADMAP_*.md
+  - TESTING.md

@@ -1,5 +1,98 @@
 # Auto Chest Opener
 
+## 3.1.0 — Centre de file, règles et mode assisté
+
+### Centre de file
+- L’onglet En attente affiche les vraies entrées de la file, les vérifications actives et les échecs de la session.
+- Nouveaux états : attente, délai, blocage, ouverture, vérification, nouvel essai, clic requis, pause et échec.
+- Affichage du motif, des tentatives et de l’ETA.
+- Actions Ouvrir le suivant, Pause/Reprise, Vider la file, Réessayer et Retirer.
+- Historique persistant borné des 50 derniers échecs.
+
+### Mode assisté
+- Nouveau mode global Automatique/Assisté, conservé dans les SavedVariables.
+- Boutons visibles basés sur `SecureActionButtonTemplate` dans l’onglet de file et le widget flottant.
+- Utilisation sécurisée par Item ID afin d’éviter d’agir sur un emplacement de sac devenu obsolète.
+- La consommation reste vérifiée après le clic avant toute statistique.
+- Nouveau raccourci pour préparer/ouvrir le prochain élément de la file.
+
+### Règles par conteneur
+- Éditeur accessible depuis l’engrenage de chaque conteneur suivi.
+- Activation automatique, délai spécifique, limite par session, priorité, blocage temporaire, source et note.
+- Blocage permanent disponible depuis l’éditeur.
+- Les limites sont vérifiées à la mise en file et avant l’ouverture.
+- Le tri privilégie les éléments prêts : un délai ou blocage futur ne retient pas le reste de la file.
+
+### Fiabilité et données
+- SavedVariables migrées vers le schéma 4.
+- Statistiques de réussite et d’échec par conteneur.
+- `Ouvrir tout` développe désormais toutes les unités d’une pile.
+- Les délais décimaux sont correctement formatés dans les notifications.
+- Nouvelles commandes `/aco mode`, `/aco next`, `/aco queue` et `/aco rules`.
+
+## 3.0.3 — Correctif des cartes KPI
+
+### Interface
+- Les trois cartes KPI utilisent désormais des zones verticales explicites pour le titre, la valeur et le détail.
+- Le sous-texte ne dépend plus de la hauteur réelle de la police et ne peut plus sortir sous la carte.
+- Les lignes KPI sont limitées à une seule ligne, sans retour automatique.
+- Les cartes masquent par sécurité tout rendu situé hors de leurs limites.
+- Les icônes et chiffres ont été légèrement recalibrés afin de conserver une bonne lisibilité à forte échelle d’interface.
+- La hauteur globale du bandeau reste inchangée afin de ne pas réduire la zone principale.
+
+## 3.0.2 — Correctif de débordement du panneau gauche
+
+### Interface
+- Les interrupteurs des paramètres utilisent désormais la largeur intérieure réelle du panneau.
+- Le curseur de délai est ancré aux deux marges et ne dépasse plus du cadre.
+- Le champ Item ID et le bouton Ajouter sont maintenant distribués dynamiquement entre les marges.
+- Le correctif reste valide à la largeur minimale de la fenêtre et avec les traductions longues.
+
+## 3.0.1 — Midnight 2.0 UI Polish
+
+### Lisibilité de la liste
+- Lignes plus hautes, icônes plus grandes et noms forcés sur une seule ligne.
+- Colonnes explicites pour la quantité en sac et la valeur moyenne estimée.
+- Les conteneurs absents des sacs sont visuellement atténués ; les quantités présentes sont mises en évidence.
+- Valeurs moyennes raccourcies pour éviter tout chevauchement avec les actions.
+
+### Ergonomie
+- Champ de recherche adaptatif, plus large, avec icône et bouton d'effacement.
+- Bouton « Ouvrir tout » renforcé et actions de bas de fenêtre agrandies.
+- KPI plus lisibles avec chiffres plus grands et détails placés sur une ligne dédiée.
+- Curseur de délai modernisé avec saisie numérique directe et bornes visibles.
+- Colonne de paramètres compactée et zone de dépôt agrandie.
+- Badge Midnight rendu volontairement discret pour ne plus ressembler à un bouton.
+
+### Compatibilité
+- Cible Retail conservée sur `120007`.
+- Aucun changement de schéma de SavedVariables : mise à jour directe depuis 3.0.0.
+
+## 3.0.0 — Retail 12.0.7 / Midnight 2.0
+
+### Compatibilité et fiabilité
+- Interface TOC mise à jour vers `120007`.
+- Ajout d'une validation des API critiques au chargement et de `/aco diag`.
+- Nouveau schéma de SavedVariables version 3 avec migration profonde et normalisation des IDs.
+- Les ouvertures ne sont plus comptabilisées avant confirmation de la consommation réelle de l'objet.
+- Nouveau moteur de vérification : attente des locks, retries limités, raisons d'échec et statistiques d'échec.
+- Correction du suivi de l'or et du butin lors des lots rapides et des retries.
+- Les timers de nettoyage ne suppriment plus les trackers créés par des ouvertures plus récentes.
+- Protection renforcée des enums de tooltip pouvant varier entre builds mineurs.
+
+### Interface Concept 1
+- Nouvelle fenêtre Midnight 2.0 en deux colonnes.
+- Bandeau KPI : or de session, ouvertures confirmées et file active.
+- Interrupteurs modernes, onglets adaptatifs et actions regroupées en bas.
+- Taille, position, onglet, recherche et vue Suivis/Bloqués persistants.
+- Ajout de `/aco resetui`.
+- Liste triée et quantité actuellement présente dans les sacs affichée.
+
+### Qualité
+- Correction de la capture `CHAT_MSG_LOOT` qui n'était pas toujours persistée.
+- Correction du formatage hexadécimal des couleurs avec des valeurs flottantes.
+- Ajout de `TESTING.md`.
+
 ## 2.2.4 — Midnight Compatibility
 ### Compatibilité Midnight (12.0+)
 - **SecureActionButton fallback** : `C_Container.UseContainerItem` est désormais protégé en 12.0+. L'addon utilise maintenant un `SecureActionButtonTemplate` en fallback pour ouvrir les conteneurs hors combat.
