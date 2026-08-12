@@ -11,3 +11,4 @@ ignore:
   - README.md
   - ROADMAP_*.md
   - TESTING.md
+  - COMPAT_*.md

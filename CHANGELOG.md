@@ -1,5 +1,19 @@
 # Auto Chest Opener
 
+## 3.1.1 — Retail 12.1.0 / Interface 120100
+
+### Compatibilité 12.1
+- Interface TOC mise à jour vers `120100`.
+- Validation effectuée contre le client Retail 12.1.0 build 69273 et les définitions API générées actuelles.
+- Vérification des appels utilisés dans `C_Container`, `C_Item`, `C_TooltipInfo` et `C_AddOns`.
+- Les changements 12.1 centrés sur les auras n’affectent pas directement Auto Chest Opener, qui ne lit aucune aura de combat.
+- Ajout de protections contre les valeurs secrètes lors de l’analyse de tooltips et des valeurs monétaires.
+
+### API et robustesse
+- Suppression de la référence à `C_Item.GetItemSellPrice`, absente de l’API Retail 12.1 générée. La valeur vendeur est désormais lue depuis le 11e résultat de `C_Item.GetItemInfo`.
+- `/aco diag` affiche maintenant la version, le build, la date du build et la conformité de l’Interface client.
+- Aucun changement de schéma SavedVariables : migration directe depuis la 3.1.0.
+
 ## 3.1.0 — Centre de file, règles et mode assisté
 
 ### Centre de file

@@ -1,7 +1,7 @@
 --[[
     Auto Chest Opener - UI Module
     Midnight-style interface (palette unifiée Zayu / Zarctus)
-    Version: 3.1.0
+    Version: 3.1.1
 ]]
 
 local addonName, ACO = ...
@@ -459,7 +459,7 @@ function ACO:InitUI()
         .. "ChestOpener|r")
 
     -- Version
-    local Version = MakeText(Header, "v" .. ACO.version .. "  •  Retail 120007", 10, C.textDim)
+    local Version = MakeText(Header, "v" .. ACO.version .. "  •  Retail 120100", 10, C.textDim)
     Version:SetPoint("TOPLEFT", Title, "BOTTOMLEFT", 0, -3)
 
     -- Theme marker: intentionally text-only so it reads as metadata, not a button.

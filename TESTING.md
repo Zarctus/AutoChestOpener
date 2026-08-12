@@ -1,16 +1,17 @@
-# Checklist de test Auto Chest Opener 3.1.0 — Retail 12.0.7
+# Checklist de test Auto Chest Opener 3.1.1 — Retail 12.1.0
 
 ## Avant le test
 
 - Sauvegarder `WTF/Account/.../SavedVariables/AutoChestOpener.lua`.
 - Activer les erreurs Lua : `/console scriptErrors 1`.
-- Installer la 3.1.0 puis faire `/reload`.
-- Lancer `/aco diag` et vérifier : interface 120007, schéma DB 4, API critiques OK.
+- Installer la 3.1.1 puis faire `/reload`.
+- Lancer `/aco diag` et vérifier : interface 120100, schéma DB 4, API critiques OK.
+- Vérifier que `/aco diag` affiche `12.1.0`, le build du client et `OK` après la cible 120100.
 
-## Migration 3.0.x → 3.1.0
+## Migration 3.0.x / 3.1.0 → 3.1.1
 
 - Vérifier que la liste de conteneurs, la blacklist, les statistiques et le butin sont conservés.
-- Vérifier que le mode initial est Automatique.
+- Vérifier que le mode Automatique/Assisté précédemment choisi est conservé.
 - Modifier une règle, faire `/reload`, puis confirmer sa persistance.
 
 ## Centre de file
@@ -49,6 +50,8 @@ Pour deux types de conteneurs différents :
 
 ## Ouverture et données
 
+- Ouvrir l’onglet principal et vérifier que les valeurs moyennes/vendeur ne génèrent aucune erreur liée aux valeurs secrètes.
+- Tester au moins un conteneur détecté via tooltip afin de valider `C_TooltipInfo.GetItemByID` sur 12.1.
 - Tester `Ouvrir tout` avec une pile supérieure à 1.
 - Vérifier Statistiques, Historique et Butin après une ouverture confirmée.
 - Vérifier qu’un essai refusé ne crée ni ouverture, ni historique, ni butin confirmé.

@@ -1,6 +1,11 @@
-# Auto Chest Opener 3.1.0
+# Auto Chest Opener 3.1.1
 
-Addon World of Warcraft Retail ciblant l’interface **120007 (12.0.7)**.
+Addon World of Warcraft Retail ciblant l’interface **120100 (12.1.0)**.
+
+## Compatibilité 12.1
+
+La 3.1.1 cible **Retail 12.1.0 / Interface 120100**. Les appels `C_Container`, `C_Item`, `C_TooltipInfo` et `C_AddOns` utilisés par l’addon ont été comparés aux définitions API live 12.1. Le détail de l’audit est disponible dans `COMPAT_12.1.md`.
+
 
 ## Nouveautés 3.1
 
@@ -81,7 +86,7 @@ Les données 3.0.x sont conservées et migrées automatiquement. Une sauvegarde 
 | `/aco queue clear` | Vider la file active |
 | `/aco queue failures` | Effacer les échecs affichés |
 | `/aco rules <itemID>` | Ouvrir l’éditeur de règles d’un conteneur |
-| `/aco diag` | Afficher les diagnostics 120007 et de file |
+| `/aco diag` | Afficher les diagnostics 120100 et de file |
 | `/aco resetui` | Réinitialiser la fenêtre |
 
 Un raccourci **Préparer/Ouvrir le prochain élément** est également disponible dans les raccourcis clavier du jeu.
@@ -97,7 +102,7 @@ Certaines utilisations d’objets peuvent être refusées silencieusement lorsqu
 
 ## Tests
 
-Consulter `TESTING.md`. La validation syntaxique et les simulations fournies ne remplacent pas un test dans le client Retail 12.0.7.
+Consulter `TESTING.md`. La validation syntaxique et les simulations fournies ne remplacent pas un test dans le client Retail 12.1.0.
 
 ## Licence
 

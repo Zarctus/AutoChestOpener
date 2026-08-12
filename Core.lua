@@ -1,7 +1,7 @@
 --[[
     Auto Chest Opener - Core Module
     Automatically opens all types of containers, chests, bags, crates, lockboxes, gifts and more
-    Version: 3.1.0
+    Version: 3.1.1
 ]]
 
 local addonName, ACO = ...
@@ -34,6 +34,17 @@ local strsplit = strsplit
 local GetMoney = GetMoney
 local UnitName = UnitName
 local Item = Item
+local issecretvalue = issecretvalue
+
+-- Retail 12.1 extends secret-value protections to more UI/API paths.
+-- Auto Chest Opener does not consume aura/combat secrets, but tooltip and money
+-- values are treated defensively so a future secret value is never coerced,
+-- compared, concatenated, or used in arithmetic by insecure addon code.
+local function IsAccessibleValue(value)
+    if value == nil then return false end
+    if issecretvalue and issecretvalue(value) then return false end
+    return true
+end
 
 -- ============================================================================
 -- SECURE ACTION BUTTON (Midnight 12.0+ compatibility)
@@ -59,7 +70,7 @@ local tocVersion = (C_AddOns and C_AddOns.GetAddOnMetadata and C_AddOns.GetAddOn
 if tocVersion == "@project-version@" then
     tocVersion = nil
 end
-ACO.version = (tocVersion and tocVersion ~= "") and tocVersion or "3.1.0"
+ACO.version = (tocVersion and tocVersion ~= "") and tocVersion or "3.1.1"
 ACO.pendingItems = {}
 ACO.itemQueue = {}
 ACO.goldTracker = {
@@ -254,7 +265,7 @@ ACO.bagSlotsByBag = {}      -- [bagID] = { [itemID] = { {slot=, hyperlink=}... }
 
 -- Default settings
 ACO.DB_SCHEMA_VERSION = 4
-ACO.SUPPORTED_INTERFACE = 120007
+ACO.SUPPORTED_INTERFACE = 120100
 
 local defaults = {
     schemaVersion = ACO.DB_SCHEMA_VERSION,
@@ -443,19 +454,40 @@ end
 
 function ACO:ValidateRuntimeAPI()
     local missing = {}
+    local optionalMissing = {}
     local function Require(path, value)
         if not value then tinsert(missing, path) end
     end
+    local function Optional(path, value)
+        if not value then tinsert(optionalMissing, path) end
+    end
 
+    -- Core inventory/opening path. Missing one of these means the addon cannot
+    -- safely perform its primary job on this Retail build.
     Require("C_Container.GetContainerNumSlots", C_Container and C_Container.GetContainerNumSlots)
     Require("C_Container.GetContainerItemInfo", C_Container and C_Container.GetContainerItemInfo)
     Require("C_Container.UseContainerItem", C_Container and C_Container.UseContainerItem)
     Require("C_Item.GetItemInfo", C_Item and C_Item.GetItemInfo)
+    Require("C_Item.GetItemInfoInstant", C_Item and C_Item.GetItemInfoInstant)
+    Require("C_Item.GetItemNameByID", C_Item and C_Item.GetItemNameByID)
+    Require("C_Item.GetItemSpell", C_Item and C_Item.GetItemSpell)
     Require("C_Timer.NewTicker", C_Timer and C_Timer.NewTicker)
 
-    local _, _, _, interfaceVersion = GetBuildInfo()
+    -- These have working fallbacks, but we still report them so /aco diag is a
+    -- useful early warning when Blizzard changes a minor-patch API.
+    Optional("C_Item.IsItemDataCachedByID", C_Item and C_Item.IsItemDataCachedByID)
+    Optional("C_Item.RequestLoadItemDataByID", C_Item and C_Item.RequestLoadItemDataByID)
+    Optional("C_TooltipInfo.GetItemByID", C_TooltipInfo and C_TooltipInfo.GetItemByID)
+    Optional("C_AddOns.GetAddOnMetadata", C_AddOns and C_AddOns.GetAddOnMetadata)
+
+    local version, build, buildDate, interfaceVersion = GetBuildInfo()
+    self.runtimeVersion = version or "?"
+    self.runtimeBuild = tostring(build or "?")
+    self.runtimeBuildDate = buildDate or "?"
     self.runtimeInterface = tonumber(interfaceVersion) or 0
     self.missingRuntimeAPI = missing
+    self.missingOptionalAPI = optionalMissing
+    self.runtimeInterfaceMatches = self.runtimeInterface == self.SUPPORTED_INTERFACE
     return #missing == 0, missing
 end
 
@@ -971,7 +1003,7 @@ function ACO:HasOpenableTooltipModern(itemID)
 
     for _, lineData in ipairs(data.lines) do
         local text = lineData.leftText
-        if text then
+        if IsAccessibleValue(text) then
             local normalized = NormalizeText(text)
             if normalized and ContainsAnyPlain(normalized, TOOLTIP_OPEN_KEYWORDS) then
                 return true
@@ -999,10 +1031,14 @@ function ACO:HasOpenableTooltipModern(itemID)
             -- These indicate an active use effect
             if lineData.leftColor then
                 local clr = lineData.leftColor
-                -- Green text = Use: effect (r < 0.1, g > 0.9, b < 0.1)
-                if clr.r and clr.g and clr.r < 0.15 and clr.g > 0.85 and (clr.b or 0) < 0.15 then
-                    if normalized and (ContainsAnyPlain(normalized, OPEN_PATTERNS) or ContainsAnyPlain(normalized, OPEN_KEYWORDS)) then
-                        return true
+                local r, g, b = clr.r, clr.g, clr.b
+                -- 12.1: never perform arithmetic/comparisons on secret values.
+                if IsAccessibleValue(r) and IsAccessibleValue(g) and (b == nil or IsAccessibleValue(b)) then
+                    -- Green text = Use: effect (r < 0.15, g > 0.85, b < 0.15)
+                    if r < 0.15 and g > 0.85 and (b or 0) < 0.15 then
+                        if normalized and (ContainsAnyPlain(normalized, OPEN_PATTERNS) or ContainsAnyPlain(normalized, OPEN_KEYWORDS)) then
+                            return true
+                        end
                     end
                 end
             end
@@ -2714,9 +2750,13 @@ function ACO:GetContainerVendorValue(containerID)
     local total = 0
     for itemID, itemData in pairs(data.items) do
         local count = type(itemData) == "number" and itemData or (itemData.count or 0)
-        local sellPrice = C_Item.GetItemSellPrice and C_Item.GetItemSellPrice(itemID)
-            or select(11, GetItemInfo(itemID))
-        if sellPrice and sellPrice > 0 then
+        -- 12.1: C_Item.GetItemSellPrice is not part of the generated Retail API.
+        -- C_Item.GetItemInfo returns sellPrice as its 11th result.
+        local sellPrice = nil
+        if C_Item and C_Item.GetItemInfo then
+            sellPrice = select(11, C_Item.GetItemInfo(itemID))
+        end
+        if IsAccessibleValue(sellPrice) and sellPrice > 0 then
             total = total + sellPrice * count
         end
     end
@@ -3568,8 +3608,9 @@ SlashCmdList["AUTOCHESTOPENER"] = function(msg)
     elseif cmd == "diag" or cmd == "diagnostics" then
         local blocked, reason = ACO:IsOpeningBlocked()
         local diagnostics = ACO.db.diagnostics or {}
-        ACO:Print("--- Diagnostics 3.1.0 ---")
-        print(format("  Interface client: %d (cible: %d)", ACO.runtimeInterface or 0, ACO.SUPPORTED_INTERFACE))
+        ACO:Print("--- Diagnostics 3.1.1 / Retail 12.1.0 ---")
+        print(format("  Client: %s build %s (%s)", tostring(ACO.runtimeVersion or "?"), tostring(ACO.runtimeBuild or "?"), tostring(ACO.runtimeBuildDate or "?")))
+        print(format("  Interface client: %d (cible: %d) %s", ACO.runtimeInterface or 0, ACO.SUPPORTED_INTERFACE, ACO.runtimeInterfaceMatches and "OK" or "MISMATCH"))
         print(format("  Schéma DB: %d", ACO.db.schemaVersion or 0))
         print(format("  Mode: %s", ACO:GetQueueMode()))
         print(format("  File: %d en attente + %d vérification(s) + %d échec(s)", #ACO.openQueue, ACO.pendingVerifications or 0, #ACO.queueFailures))
@@ -3579,9 +3620,14 @@ SlashCmdList["AUTOCHESTOPENER"] = function(msg)
             print(format("  Dernier échec: %s (item %s)", diagnostics.lastFailure, tostring(diagnostics.lastFailureItemID or "?")))
         end
         if ACO.missingRuntimeAPI and #ACO.missingRuntimeAPI > 0 then
-            print("  API manquantes: " .. table.concat(ACO.missingRuntimeAPI, ", "))
+            print("  API critiques manquantes: " .. table.concat(ACO.missingRuntimeAPI, ", "))
         else
             print("  API critiques: OK")
+        end
+        if ACO.missingOptionalAPI and #ACO.missingOptionalAPI > 0 then
+            print("  API optionnelles manquantes: " .. table.concat(ACO.missingOptionalAPI, ", "))
+        else
+            print("  API optionnelles: OK")
         end
     elseif cmd == "mode" then
         local mode = lower(tostring(arg or ""))
@@ -3735,7 +3781,7 @@ SlashCmdList["AUTOCHESTOPENER"] = function(msg)
         print("  /aco import - Importer des conteneurs")
         print("  /aco export - Exporter les conteneurs")
         print("  /aco clear - Vider la liste")
-        print("  /aco diag - Afficher les diagnostics 120007")
+        print("  /aco diag - Afficher les diagnostics 120100")
         print("  /aco resetui - Réinitialiser la fenêtre")
         print("  /aco debug - Mode debug")
     end
