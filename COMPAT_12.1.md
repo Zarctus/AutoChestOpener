@@ -1,51 +1,43 @@
-# Audit de compatibilité Retail 12.1.0
+# Auto Chest Opener 3.2.0 — compatibilité Retail 12.1.0
 
-Cible de cette version : **Interface 120100**.
+Cible : **Interface 120100**.
 
-Référence vérifiée pendant la mise à jour : client Retail **12.1.0 build 69273** et définitions API générées de la branche live correspondante.
+La 3.2 conserve le portage API réalisé en 3.1.1 et concentre les changements sur la fiabilité de la file et le respect des actions protégées.
 
-## API utilisées par l'addon
+## API principales utilisées
 
-Les appels suivants ont été comparés aux définitions 12.1.0 actuelles :
+- `C_Container.GetContainerItemInfo`
+- `C_Container.GetContainerNumSlots`
+- `C_Container.UseContainerItem`
+- `C_Item.GetItemIconByID`
+- `C_Item.GetItemInfo`
+- `C_Item.GetItemInfoInstant`
+- `C_Item.GetItemNameByID`
+- `C_Item.GetItemSpell`
+- `C_Item.IsItemDataCachedByID`
+- `C_Item.RequestLoadItemDataByID`
+- `C_TooltipInfo.GetItemByID`
+- `C_AddOns.GetAddOnMetadata`
 
-- `C_Container.GetContainerItemInfo` — OK
-- `C_Container.GetContainerNumSlots` — OK
-- `C_Container.UseContainerItem` — OK
-- `C_Item.GetItemIconByID` — OK
-- `C_Item.GetItemInfo` — OK
-- `C_Item.GetItemInfoInstant` — OK
-- `C_Item.GetItemNameByID` — OK
-- `C_Item.GetItemSpell` — OK
-- `C_Item.IsItemDataCachedByID` — OK
-- `C_Item.RequestLoadItemDataByID` — OK
-- `C_TooltipInfo.GetItemByID` — OK
-- `C_AddOns.GetAddOnMetadata` — OK
+La valeur vendeur continue d'être obtenue via le résultat `sellPrice` de `C_Item.GetItemInfo`; le code ne dépend pas de `C_Item.GetItemSellPrice`.
 
-## Correction API effectuée
+## Valeurs potentiellement protégées
 
-`C_Item.GetItemSellPrice` n'est pas présent dans la documentation API Retail 12.1 générée. Le code de valeur vendeur n'en dépend plus : il récupère `sellPrice` depuis le 11e résultat de `C_Item.GetItemInfo`, qui est documenté en 12.1.
+Les textes/couleurs de tooltip et les valeurs monétaires sont validés avant comparaison ou calcul. En 3.2, les chemins de suivi d'or utilisent également un accès défensif : si `GetMoney()` renvoie une valeur inaccessible, le delta d'or est ignoré plutôt que de provoquer une opération Lua sur cette valeur.
 
-## Valeurs secrètes et 12.1
+## Politique d'actions protégées
 
-12.1 étend l'usage des protections de valeurs secrètes dans l'interface. L'addon ne lit pas les auras de combat et n'utilise ni `C_UnitAuras`, ni `UnitAura`, ni `AuraUtil`.
+- **Automatique** : utilisation de l'API publique uniquement, suivie d'une vérification réelle de consommation.
+- **Assisté** : bouton visible `SecureActionButtonTemplate`, préparé hors combat et déclenché par un clic matériel du joueur.
+- Aucun appel programmatique à `Button:Click()` n'est utilisé pour tenter de provoquer une action sécurisée.
+- Un refus de l'API automatique devient un échec explicite et peut orienter le joueur vers le mode Assisté.
 
-Des gardes ont néanmoins été ajoutés avant :
+## Confirmation stricte
 
-- la normalisation de texte de tooltip ;
-- les comparaisons de composantes de couleur de tooltip ;
-- les calculs utilisant la valeur vendeur d'un objet.
+La réussite dépend uniquement d'une diminution observée de la quantité de l'Item ID concerné. Une API qui ne lève aucune erreur n'est pas considérée comme preuve de réussite.
 
-L'objectif est qu'une valeur marquée secrète par un futur hotfix soit ignorée plutôt que comparée, concaténée ou utilisée dans un calcul Lua non sécurisé.
-
-## Actions protégées
-
-L'ouverture reste volontairement conçue en deux chemins :
-
-- mode automatique : tentative via l'API puis vérification réelle de consommation ;
-- mode assisté : bouton `SecureActionButtonTemplate` nécessitant un clic matériel du joueur.
-
-Aucune ouverture n'est comptabilisée tant que la diminution de la pile n'a pas été confirmée.
+La file est sérialisée pendant cette vérification afin d'éviter qu'une diminution issue d'une autre action soit attribuée au mauvais élément.
 
 ## SavedVariables
 
-Le schéma reste **4**. La 3.1.1 ne nécessite aucune remise à zéro et conserve les données de la 3.1.0.
+Schéma **5**. La migration depuis le schéma 4 conserve les données existantes et initialise uniquement les nouveaux paramètres de fiabilité, de widget et de circuit anti-boucle.

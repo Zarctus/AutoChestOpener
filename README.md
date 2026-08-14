@@ -1,108 +1,128 @@
-# Auto Chest Opener 3.1.1
+# Auto Chest Opener 3.2.0
 
-Addon World of Warcraft Retail ciblant l’interface **120100 (12.1.0)**.
+Addon World of Warcraft Retail ciblant **12.1.0 / Interface 120100**.
 
-## Compatibilité 12.1
+## Direction de la 3.2
 
-La 3.1.1 cible **Retail 12.1.0 / Interface 120100**. Les appels `C_Container`, `C_Item`, `C_TooltipInfo` et `C_AddOns` utilisés par l’addon ont été comparés aux définitions API live 12.1. Le détail de l’audit est disponible dans `COMPAT_12.1.md`.
+Cette version privilégie la fiabilité avant la vitesse. Le cœur de l'addon applique désormais une règle simple : **une utilisation n'est jamais considérée comme réussie tant que la quantité du conteneur n'a pas réellement diminué**.
 
+La file est également sérialisée : tant qu'une ouverture est en cours de vérification, aucune autre utilisation automatique n'est lancée. Cela évite qu'une diminution de pile provoquée par une première action soit attribuée à tort à une seconde.
 
-## Nouveautés 3.1
+## Sécurité et restrictions Blizzard
 
-### Centre de file
+Deux chemins sont disponibles :
 
-L’onglet **En attente** affiche maintenant la véritable file d’ouverture, et non une simple liste des conteneurs présents dans les sacs.
+- **Automatique** : l'addon appelle l'API publique de conteneur, puis vérifie la consommation réelle.
+- **Assisté** : l'addon prépare un bouton visible `SecureActionButtonTemplate`; le joueur effectue lui-même le clic matériel.
 
-Chaque entrée expose :
+Il n'existe plus de fallback caché tentant de cliquer programmatiquement sur un bouton sécurisé. Si le client exige une action matérielle, l'addon l'explique et propose le mode Assisté au lieu d'essayer de contourner la protection.
 
-- son état : attente, délai, blocage, ouverture, vérification, nouvel essai ou échec ;
-- la raison exacte du blocage ou de l’échec ;
+## Circuit anti-boucle
+
+Les échecs automatiques consécutifs sont suivis par type de conteneur. Une fois le seuil atteint :
+
+- les nouvelles tentatives automatiques de cet objet sont suspendues temporairement ;
+- ses autres entrées automatiques sont retirées de la file ;
+- la raison et le temps restant sont visibles dans les règles et le diagnostic ;
+- un succès confirmé réarme automatiquement le circuit ;
+- un retry explicitement demandé par le joueur reste possible.
+
+## Profils de file
+
+Trois profils sont proposés :
+
+- **Prudent** : vérifications plus longues, arrêt sur erreur, circuit déclenché dès le premier échec automatique ;
+- **Normal** : compromis recommandé ;
+- **Rapide** : vérifications plus courtes, sans retirer les garde-fous essentiels ;
+- **Personnalisé** : utilisé automatiquement lors de la migration d'une ancienne 3.1 afin de préserver les réglages exacts déjà enregistrés.
+
+Les profils règlent la mécanique de file et de vérification. Ils ne remplacent pas le délai global ou le délai spécifique défini dans une règle de conteneur.
+
+## Centre de file
+
+L'onglet **En attente** affiche :
+
+- la vérification réellement active ;
+- les éléments en attente ;
+- l'état et la raison de chaque entrée ;
 - le nombre de tentatives ;
-- une estimation du délai restant ;
-- les actions Réessayer et Retirer lorsque cela s’applique.
+- une ETA cohérente avec l'exécution sérialisée ;
+- les échecs de session.
 
-La file peut être mise en pause, reprise, vidée ou avancée manuellement.
+Filtres disponibles : **Tout**, **Actifs**, **Bloqués**, **Échecs**.
 
-### Mode assisté
+Les actions comprennent Pause/Reprise, Ouvrir le suivant, Vider la file, Retirer et Réessayer. Un échec `NOT_CONSUMED` ou `PROTECTED` propose directement un retry Assisté.
 
-Le mode **Assisté** prépare le prochain conteneur sur un véritable `SecureActionButtonTemplate`. Le joueur effectue alors un clic matériel sur **Ouvrir le suivant**.
+## Règles par conteneur
 
-Ce mode ne contourne pas les protections de Blizzard. Il fournit un chemin fiable lorsque l’utilisation automatique d’un objet est refusée par le client.
+L'engrenage d'un conteneur permet de gérer :
 
-Le bouton sécurisé est disponible :
+- ouverture automatique ;
+- délai spécifique ;
+- limite d'ouvertures par session ;
+- priorité ;
+- blocage temporaire ;
+- source et note ;
+- blocage permanent.
 
-- dans l’onglet En attente ;
-- dans le widget flottant de file lorsque la fenêtre principale est fermée.
+Toutes les règles peuvent être exportées/importées avec le format versionné **ACORULES1**. L'import fusionne les règles sans réinitialiser les autres SavedVariables.
 
-### Règles par conteneur
+## Widget compact
 
-Le bouton d’engrenage de chaque ligne ouvre un éditeur permettant de régler :
+Le widget de file est désormais réellement facultatif. Sur une nouvelle installation il est désactivé par défaut. Lorsqu'il est activé, sa position est conservée.
 
-- l’ouverture automatique pour cet objet ;
-- un délai spécifique, ou le délai global ;
-- une limite d’ouvertures par session ;
-- une priorité de file de -10 à 10 ;
-- un blocage temporaire en minutes ;
-- une source et une note personnelles ;
-- un blocage permanent.
+La 3.2 n'ajoute volontairement aucune nouvelle fenêtre flottante.
 
-Les priorités ne permettent pas à un objet temporairement bloqué de retenir les autres entrées prêtes.
+## SavedVariables
 
-### Données et diagnostics
+Le schéma passe à **5**. La migration conserve notamment :
 
-- Schéma de SavedVariables **4**, migré automatiquement depuis les versions précédentes.
-- Succès, échecs, dernière réussite et dernier motif d’échec conservés par conteneur.
-- Historique persistant borné des 50 derniers échecs.
-- Limites de session appliquées dès la mise en file et à nouveau avant l’ouverture.
-- Les piles sont correctement développées par `Ouvrir tout`.
-
-## Installation
-
-1. Fermer World of Warcraft.
-2. Extraire le dossier `AutoChestOpener` dans :
-
-   `World of Warcraft/_retail_/Interface/AddOns/`
-
-3. Vérifier que ce fichier existe directement dans le dossier :
-
-   `AutoChestOpener/AutoChestOpener.toc`
-
-4. Relancer le jeu ou utiliser `/reload`.
-
-Les données 3.0.x sont conservées et migrées automatiquement. Une sauvegarde du dossier `WTF` reste recommandée avant un test majeur.
+- conteneurs suivis ;
+- blacklist ;
+- réglages ;
+- statistiques ;
+- historique ;
+- résumé de butin ;
+- règles par conteneur ;
+- choix Automatique/Assisté.
 
 ## Commandes principales
 
 | Commande | Action |
 |---|---|
-| `/aco` | Afficher ou masquer l’interface |
-| `/aco add <itemID>` | Ajouter un conteneur |
-| `/aco remove <itemID>` | Retirer un conteneur |
+| `/aco` | Afficher ou masquer l'interface |
 | `/aco openall` | Mettre en file tous les conteneurs éligibles |
-| `/aco mode auto` | Utiliser le mode automatique |
-| `/aco mode assisted` | Utiliser le mode assisté |
-| `/aco next` | Préparer ou accélérer le prochain élément |
-| `/aco queue` | Ouvrir directement le centre de file |
+| `/aco mode auto` | Mode automatique |
+| `/aco mode assisted` | Mode assisté |
+| `/aco next` | Préparer/avancer le prochain élément |
+| `/aco queue` | Ouvrir le centre de file |
 | `/aco queue clear` | Vider la file active |
-| `/aco queue failures` | Effacer les échecs affichés |
-| `/aco rules <itemID>` | Ouvrir l’éditeur de règles d’un conteneur |
-| `/aco diag` | Afficher les diagnostics 120100 et de file |
-| `/aco resetui` | Réinitialiser la fenêtre |
+| `/aco queue failures` | Effacer les échecs de session |
+| `/aco profile prudent` | Profil de sécurité Prudent |
+| `/aco profile normal` | Profil Normal |
+| `/aco profile fast` | Profil Rapide |
+| `/aco widget on` | Activer le widget compact |
+| `/aco widget off` | Désactiver le widget compact |
+| `/aco rules <itemID>` | Éditer les règles d'un conteneur |
+| `/aco rules export` | Exporter toutes les règles |
+| `/aco rules import` | Ouvrir l'import des règles |
+| `/aco diag` | Diagnostic complet |
+| `/aco resetui` | Réinitialiser uniquement l'UI |
 
-Un raccourci **Préparer/Ouvrir le prochain élément** est également disponible dans les raccourcis clavier du jeu.
+## Installation
 
-## Limite importante de l’API Retail
+1. Fermer World of Warcraft.
+2. Remplacer le dossier `Interface/AddOns/AutoChestOpener` par celui contenu dans le ZIP.
+3. Relancer le jeu ou utiliser `/reload`.
+4. Exécuter `/aco diag`.
 
-Certaines utilisations d’objets peuvent être refusées silencieusement lorsque le client exige une action matérielle réelle. L’addon :
+Il n'est pas nécessaire de supprimer les SavedVariables pour passer depuis la 3.1.1.
 
-- vérifie que la quantité du conteneur a réellement diminué ;
-- n’enregistre jamais une ouverture avant cette confirmation ;
-- effectue des essais limités en mode automatique ;
-- propose le mode assisté pour effectuer le clic sécurisé légitime.
+## Choix de roadmap
 
-## Tests
+L'export CSV de l'historique n'a pas été retenu dans cette version : il apporte de la valeur analytique, mais pratiquement aucune valeur de fiabilité. Le même raisonnement s'applique à un nouveau panneau compact près des sacs : le widget existant a été rendu facultatif plutôt que de créer une interface supplémentaire.
 
-Consulter `TESTING.md`. La validation syntaxique et les simulations fournies ne remplacent pas un test dans le client Retail 12.1.0.
+Consulter `TESTING.md` avant validation définitive en jeu.
 
 ## Licence
 

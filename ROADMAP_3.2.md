@@ -1,11 +1,23 @@
-# Proposition Auto Chest Opener 3.2
+# Bilan de la roadmap 3.2
 
-Priorités proposées après validation de la 3.1 :
+## Retenu en 3.2.0
 
-1. Profils Prudent, Normal, Rapide et Personnalisé.
-2. Panneau compact facultatif près des sacs : statut, prochain élément, pause et clic assisté.
-3. Export CSV de l’historique des ouvertures et des échecs.
-4. Filtres et tris supplémentaires dans le centre de file.
-5. Import/export des règles par conteneur avec version de format.
+1. **Profils Prudent / Normal / Rapide / Personnalisé** — forte valeur : ils rendent le compromis fiabilité/vitesse compréhensible sans multiplier les réglages visibles.
+2. **Widget compact facultatif** — le widget existant est conservé, désactivable et positionné de façon persistante. Aucun nouveau panneau près des sacs n'est créé.
+3. **Filtres du centre de file** — retenus pour lire plus vite les blocages et échecs.
+4. **Import/export versionné des règles** — retenu pour sauvegarder et transférer une configuration complexe sans toucher aux statistiques.
+5. **Circuit anti-boucle + sérialisation des vérifications** — ajouté hors roadmap initiale car sa valeur de fiabilité est supérieure à tous les éléments cosmétiques proposés.
 
-À ne pas commencer avant d’avoir des retours réels sur les objets nécessitant le mode assisté.
+## Différé
+
+### Export CSV de l'historique
+
+Différé. Il aide l'analyse externe mais ne rend pas l'ouverture plus fiable. À réévaluer après retours réels de la 3.2.
+
+### Tris supplémentaires arbitraires
+
+Non ajoutés pour l'instant. Le centre de file doit d'abord refléter ce qui va réellement être exécuté. Un tri purement visuel peut devenir trompeur si l'ordre d'exécution reste différent.
+
+### Nouveau panneau compact près des sacs
+
+Non retenu. Il créerait un élément flottant supplémentaire alors que le besoin peut être couvert par le widget existant, maintenant facultatif.

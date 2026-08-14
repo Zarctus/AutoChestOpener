@@ -1,4 +1,4 @@
-# Auto Chest Opener 3.1.1
+# Auto Chest Opener 3.2.0
 
 ## English
 
@@ -6,6 +6,17 @@ Auto Chest Opener tracks selected container items in the player's bags and manag
 
 ### Highlights
 - Retail **12.1.0 / Interface 120100** support.
+
+## 3.2.0 — Reliability First
+
+- File sérialisée : une ouverture est confirmée ou échouée avant de lancer la suivante.
+- Circuit anti-boucle par conteneur avec raison et cooldown visibles.
+- Profils Prudent / Normal / Rapide et migration Personnalisé.
+- Aucun fallback de clic sécurisé programmatique ; mode Assisté uniquement via clic réel.
+- Import/export `ACORULES1` des règles.
+- Widget compact facultatif et désactivé par défaut sur une nouvelle installation.
+- SavedVariables migrées vers le schéma 5.
+
 - Automatic and assisted queue modes.
 - Assisted opening through a visible secure button requiring a real player click.
 - Queue center with status, blockers, retries, failures and estimated wait.

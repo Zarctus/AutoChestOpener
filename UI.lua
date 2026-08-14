@@ -1,7 +1,7 @@
 --[[
     Auto Chest Opener - UI Module
     Midnight-style interface (palette unifiée Zayu / Zarctus)
-    Version: 3.1.1
+    Version: 3.2.0
 ]]
 
 local addonName, ACO = ...
@@ -34,6 +34,39 @@ local GetTime = GetTime
 
 ACO.UI = {}
 local UI = ACO.UI
+
+-- Secure queue controls are never shown/hidden/reconfigured in combat.  A
+-- protected child can make seemingly cosmetic visibility changes unsafe, so
+-- requests are deferred until PLAYER_REGEN_ENABLED.
+function UI:SetQueueWidgetVisible(visible)
+    self._queueWidgetWanted = visible and true or false
+    if InCombatLockdown and InCombatLockdown() then
+        self._secureQueueRefreshPending = true
+        return false
+    end
+    if not self.queueWidget then return false end
+    if visible and ACO.db and ACO.db.ui and ACO.db.ui.queueWidgetEnabled then
+        self.queueWidget:Show()
+    else
+        self.queueWidget:Hide()
+    end
+    self._secureQueueRefreshPending = false
+    return true
+end
+
+function UI:RefreshProtectedQueueUI()
+    if InCombatLockdown and InCombatLockdown() then
+        self._secureQueueRefreshPending = true
+        return false
+    end
+    if self.UpdateQueueModeControls then self:UpdateQueueModeControls() end
+    if self.ConfigureAssistedButtons then self:ConfigureAssistedButtons(ACO.assistedEntry) end
+    local wantsWidget = ACO.db and ACO.db.ui and ACO.db.ui.queueWidgetEnabled
+        and (#ACO.openQueue > 0 or (ACO.pendingVerifications or 0) > 0)
+    if self.queueWidget then self:SetQueueWidgetVisible(wantsWidget) end
+    self._secureQueueRefreshPending = false
+    return true
+end
 
 -- ============================================================================
 -- UI CONSTANTS
@@ -774,7 +807,7 @@ function ACO:InitUI()
     -- ========================================================================
 
     local OptionsSection = CreateFrame("Frame", nil, ContainersContent, "BackdropTemplate")
-    OptionsSection:SetSize(LEFT_COLUMN_WIDTH, 286)
+    OptionsSection:SetSize(LEFT_COLUMN_WIDTH, 314)
     OptionsSection:SetPoint("TOPLEFT", PADDING, -PADDING)
     ApplyBackdrop(OptionsSection, C.row, C.border)
 
@@ -831,10 +864,21 @@ function ACO:InitUI()
         ACO.db.autoOpenOnLogin = checked
     end
 
+    -- Optional compact queue widget. Off by default in 3.2 to keep the screen
+    -- quiet unless the player explicitly wants a floating queue indicator.
+    local QueueWidgetCheck = CreateModernCheckbox(OptionsSection, ACO:Translate("QUEUE_WIDGET_ENABLE"), ACO:Translate("QUEUE_WIDGET_ENABLE_TIP"))
+    QueueWidgetCheck:SetPoint("TOPLEFT", AutoOpenLoginCheck, "BOTTOMLEFT", 0, -6)
+    QueueWidgetCheck:SetPoint("TOPRIGHT", AutoOpenLoginCheck, "BOTTOMRIGHT", 0, -6)
+    QueueWidgetCheck.checkbox:SetChecked(ACO.db.ui and ACO.db.ui.queueWidgetEnabled == true)
+    QueueWidgetCheck.checkbox.callback = function(checked)
+        if ACO.db and ACO.db.ui then ACO.db.ui.queueWidgetEnabled = checked end
+        UI:SetQueueWidgetVisible(checked and (#ACO.openQueue > 0 or (ACO.pendingVerifications or 0) > 0))
+    end
+
     -- Delay slider
     local DelaySlider = CreateModernSlider(OptionsSection, ACO:Translate("DELAY_SLIDER_LABEL"), 0, 10, 0.5, ACO:Translate("DELAY_TOOLTIP"))
-    DelaySlider:SetPoint("TOPLEFT", AutoOpenLoginCheck, "BOTTOMLEFT", 0, -9)
-    DelaySlider:SetPoint("TOPRIGHT", AutoOpenLoginCheck, "BOTTOMRIGHT", 0, -9)
+    DelaySlider:SetPoint("TOPLEFT", QueueWidgetCheck, "BOTTOMLEFT", 0, -9)
+    DelaySlider:SetPoint("TOPRIGHT", QueueWidgetCheck, "BOTTOMRIGHT", 0, -9)
     DelaySlider.callback = function(value)
         ACO.db.delay = value
     end
@@ -1282,7 +1326,7 @@ function ACO:InitUI()
 
         if not RuleEditor then
             RuleEditor = CreateFrame("Frame", "ACORuleEditor", MainFrame, "BackdropTemplate")
-            RuleEditor:SetSize(500, 430)
+            RuleEditor:SetSize(500, 470)
             RuleEditor:SetPoint("CENTER", MainFrame, "CENTER", 0, 0)
             RuleEditor:SetFrameLevel(MainFrame:GetFrameLevel() + 40)
             RuleEditor:EnableMouse(true)
@@ -1370,19 +1414,26 @@ function ACO:InitUI()
             RuleEditor.note = note
 
             local diagnostic = MakeText(RuleEditor, "", 9, C.textDim)
-            diagnostic:SetPoint("BOTTOMLEFT", 16, 48)
+            diagnostic:SetPoint("BOTTOMLEFT", 16, 86)
             diagnostic:SetPoint("RIGHT", -16, 0)
             diagnostic:SetJustifyH("LEFT")
             RuleEditor.diagnostic = diagnostic
 
             local SaveBtn = CreateModernButton(RuleEditor, ACO:Translate("RULES_SAVE"), 104, 28, true)
-            SaveBtn:SetPoint("BOTTOMRIGHT", -16, 14)
+            SaveBtn:SetPoint("BOTTOMRIGHT", -16, 50)
             local CancelBtn = CreateModernButton(RuleEditor, ACO:Translate("RULES_CANCEL"), 86, 28, false)
             CancelBtn:SetPoint("RIGHT", SaveBtn, "LEFT", -8, 0)
             local ResetBtn = CreateModernButton(RuleEditor, ACO:Translate("RULES_RESET"), 104, 28, false)
-            ResetBtn:SetPoint("BOTTOMLEFT", 16, 14)
+            ResetBtn:SetPoint("BOTTOMLEFT", 16, 50)
             local BlockBtn = CreateModernButton(RuleEditor, ACO:Translate("RULES_PERMANENT_BLOCK"), 128, 28, false)
             BlockBtn:SetPoint("LEFT", ResetBtn, "RIGHT", 8, 0)
+
+            local ExportRulesBtn = CreateModernButton(RuleEditor, ACO:Translate("RULES_EXPORT_ALL"), 132, 26, false)
+            ExportRulesBtn:SetPoint("BOTTOMLEFT", 16, 14)
+            local ImportRulesBtn = CreateModernButton(RuleEditor, ACO:Translate("RULES_IMPORT_ALL"), 132, 26, false)
+            ImportRulesBtn:SetPoint("LEFT", ExportRulesBtn, "RIGHT", 8, 0)
+            ExportRulesBtn:SetScript("OnClick", function() ACO:ShowRulesExportFrame() end)
+            ImportRulesBtn:SetScript("OnClick", function() ACO:ShowRulesImportFrame() end)
 
             CancelBtn:SetScript("OnClick", function() RuleEditor:Hide() end)
             SaveBtn:SetScript("OnClick", function()
@@ -1437,7 +1488,14 @@ function ACO:InitUI()
         local stat = ACO:GetContainerDiagnostic(itemID, false) or { success = 0, failed = 0 }
         local total = (stat.success or 0) + (stat.failed or 0)
         local rate = total > 0 and floor((stat.success or 0) / total * 100 + 0.5) or 0
-        RuleEditor.diagnostic:SetText(format(ACO:Translate("RULES_DIAGNOSTIC_FORMAT"), stat.success or 0, stat.failed or 0, rate))
+        local diagnosticText = format(ACO:Translate("RULES_DIAGNOSTIC_FORMAT"), stat.success or 0, stat.failed or 0, rate)
+        local circuitRemaining = ACO:GetFailureCircuitRemaining(itemID)
+        if circuitRemaining > 0 then
+            diagnosticText = diagnosticText .. " · |cffff8800" .. format(ACO:Translate("RULES_CIRCUIT_ACTIVE"), ACO:FormatQueueETA(circuitRemaining)) .. "|r"
+        elseif stat.lastFailureReason then
+            diagnosticText = diagnosticText .. " · " .. ACO:GetQueueReasonText(stat.lastFailureReason)
+        end
+        RuleEditor.diagnostic:SetText(diagnosticText)
         RuleEditor:Show()
         RuleEditor:Raise()
     end
@@ -1478,6 +1536,8 @@ function ACO:InitUI()
             ruleTag = ACO:Translate("RULES_TAG_DISABLED")
         elseif (itemRule.temporaryBlockUntil or 0) > time() then
             ruleTag = ACO:Translate("RULES_TAG_TEMP")
+        elseif ACO:GetFailureCircuitRemaining(itemID) > 0 then
+            ruleTag = ACO:Translate("RULES_TAG_CIRCUIT")
         elseif (itemRule.maxPerSession or 0) > 0 and (ACO.sessionOpenCounts[itemID] or 0) >= itemRule.maxPerSession then
             ruleTag = ACO:Translate("RULES_TAG_LIMIT")
         end
@@ -1823,15 +1883,37 @@ function ACO:InitUI()
     local ClearFailuresBtn = CreateModernButton(PendingSection, ACO:Translate("QUEUE_CLEAR_FAILURES"), 110, 26, false)
     ClearFailuresBtn:SetPoint("RIGHT", ClearQueueBtn, "LEFT", -6, 0)
 
+    -- Safety profiles deliberately expose only the presets that have a clear
+    -- operational meaning. Existing custom timings remain labelled Custom.
+    local ProfileLabel = MakeText(PendingSection, ACO:Translate("QUEUE_PROFILE_LABEL"), 10, C.textDim)
+    ProfileLabel:SetPoint("TOPLEFT", PADDING, -88)
+    local ProfilePrudentBtn = CreateModernButton(PendingSection, ACO:Translate("QUEUE_PROFILE_PRUDENT"), 82, 24, false)
+    ProfilePrudentBtn:SetPoint("LEFT", ProfileLabel, "RIGHT", 8, 0)
+    local ProfileNormalBtn = CreateModernButton(PendingSection, ACO:Translate("QUEUE_PROFILE_NORMAL"), 82, 24, false)
+    ProfileNormalBtn:SetPoint("LEFT", ProfilePrudentBtn, "RIGHT", 5, 0)
+    local ProfileFastBtn = CreateModernButton(PendingSection, ACO:Translate("QUEUE_PROFILE_FAST"), 82, 24, false)
+    ProfileFastBtn:SetPoint("LEFT", ProfileNormalBtn, "RIGHT", 5, 0)
+    local ProfileCurrent = MakeText(PendingSection, "", 9, C.textDim)
+    ProfileCurrent:SetPoint("LEFT", ProfileFastBtn, "RIGHT", 8, 0)
+
     local QueueStatusText = MakeText(PendingSection, "", 10, C.textDim)
-    QueueStatusText:SetPoint("TOPLEFT", PADDING, -84)
+    QueueStatusText:SetPoint("TOPLEFT", PADDING, -120)
     QueueStatusText:SetPoint("RIGHT", PendingSection, "RIGHT", -PADDING, 0)
     QueueStatusText:SetJustifyH("LEFT")
 
+    local FilterAllBtn = CreateModernButton(PendingSection, ACO:Translate("QUEUE_FILTER_ALL"), 72, 22, false)
+    FilterAllBtn:SetPoint("TOPLEFT", PADDING, -144)
+    local FilterActiveBtn = CreateModernButton(PendingSection, ACO:Translate("QUEUE_FILTER_ACTIVE"), 72, 22, false)
+    FilterActiveBtn:SetPoint("LEFT", FilterAllBtn, "RIGHT", 5, 0)
+    local FilterBlockedBtn = CreateModernButton(PendingSection, ACO:Translate("QUEUE_FILTER_BLOCKED"), 78, 22, false)
+    FilterBlockedBtn:SetPoint("LEFT", FilterActiveBtn, "RIGHT", 5, 0)
+    local FilterFailedBtn = CreateModernButton(PendingSection, ACO:Translate("QUEUE_FILTER_FAILED"), 78, 22, false)
+    FilterFailedBtn:SetPoint("LEFT", FilterBlockedBtn, "RIGHT", 5, 0)
+
     local PendingHeader = CreateFrame("Frame", nil, PendingSection, "BackdropTemplate")
     PendingHeader:SetHeight(20)
-    PendingHeader:SetPoint("TOPLEFT", PADDING, -104)
-    PendingHeader:SetPoint("TOPRIGHT", -PADDING - 20, -104)
+    PendingHeader:SetPoint("TOPLEFT", PADDING, -174)
+    PendingHeader:SetPoint("TOPRIGHT", -PADDING - 20, -174)
     ApplyBackdrop(PendingHeader, C.bg, C.border)
     local PendingHeaderName = MakeText(PendingHeader, ACO:Translate("LIST_COL_CONTAINER"), 9, C.textDim)
     PendingHeaderName:SetPoint("LEFT", 10, 0)
@@ -1839,7 +1921,7 @@ function ACO:InitUI()
     PendingHeaderStatus:SetPoint("RIGHT", -118, 0)
 
     local PendingScroll = CreateFrame("ScrollFrame", nil, PendingSection, "UIPanelScrollFrameTemplate")
-    PendingScroll:SetPoint("TOPLEFT", PADDING, -128)
+    PendingScroll:SetPoint("TOPLEFT", PADDING, -198)
     PendingScroll:SetPoint("BOTTOMRIGHT", -PADDING - 20, PADDING)
 
     local PendingScrollChild = CreateFrame("Frame", nil, PendingScroll)
@@ -1849,6 +1931,52 @@ function ACO:InitUI()
     UI.pendingListItems = {}
     UI.assistedButtons = UI.assistedButtons or {}
     tinsert(UI.assistedButtons, AssistedOpenBtn)
+
+    local profileButtons = { prudent = ProfilePrudentBtn, normal = ProfileNormalBtn, fast = ProfileFastBtn }
+    function UI:UpdateQueueProfileControls()
+        local current = ACO:GetQueueProfile()
+        for key, button in pairs(profileButtons) do
+            if key == current then
+                button:SetBackdropColor(C.accent.r * 0.25, C.accent.g * 0.25, C.accent.b * 0.25, 0.9)
+                button:SetBackdropBorderColor(C.accent.r, C.accent.g, C.accent.b, 1)
+            else
+                button:SetBackdropColor(C.row.r, C.row.g, C.row.b, C.row.a)
+                button:SetBackdropBorderColor(C.border.r, C.border.g, C.border.b, 1)
+            end
+        end
+        local key = "QUEUE_PROFILE_" .. string.upper(current)
+        ProfileCurrent:SetText(ACO:Translate(key))
+    end
+    ProfilePrudentBtn:SetScript("OnClick", function() ACO:ApplyQueueProfile("prudent") end)
+    ProfileNormalBtn:SetScript("OnClick", function() ACO:ApplyQueueProfile("normal") end)
+    ProfileFastBtn:SetScript("OnClick", function() ACO:ApplyQueueProfile("fast") end)
+    for _, button in pairs(profileButtons) do
+        button:SetScript("OnLeave", function() UI:UpdateQueueProfileControls() GameTooltip:Hide() end)
+    end
+
+    local filterButtons = { all = FilterAllBtn, active = FilterActiveBtn, blocked = FilterBlockedBtn, failed = FilterFailedBtn }
+    local function UpdateQueueFilterButtons()
+        local current = (ACO.db.ui and ACO.db.ui.queueFilter) or "all"
+        for key, button in pairs(filterButtons) do
+            if key == current then
+                button:SetBackdropColor(C.accent.r * 0.25, C.accent.g * 0.25, C.accent.b * 0.25, 0.9)
+                button:SetBackdropBorderColor(C.accent.r, C.accent.g, C.accent.b, 1)
+            else
+                button:SetBackdropColor(C.row.r, C.row.g, C.row.b, C.row.a)
+                button:SetBackdropBorderColor(C.border.r, C.border.g, C.border.b, 1)
+            end
+        end
+    end
+    for key, button in pairs(filterButtons) do
+        button:SetScript("OnClick", function()
+            ACO.db.ui.queueFilter = key
+            UpdateQueueFilterButtons()
+            UI:RefreshPendingList()
+        end)
+        button:SetScript("OnLeave", function() UpdateQueueFilterButtons() end)
+    end
+    UpdateQueueFilterButtons()
+    UI:UpdateQueueProfileControls()
 
     local function GetQueueStatusPresentation(status)
         local labels = {
@@ -1880,11 +2008,12 @@ function ACO:InitUI()
 
     function UI:ConfigureAssistedButtons(entry)
         if not self.assistedButtons then return end
+        if InCombatLockdown and InCombatLockdown() then
+            self._secureQueueRefreshPending = true
+            return
+        end
         for _, button in ipairs(self.assistedButtons) do
-            if InCombatLockdown and InCombatLockdown() then
-                button:Disable()
-                button:SetAlpha(0.45)
-            elseif entry and entry.itemID then
+            if entry and entry.itemID then
                 button._acoQueueID = entry.queueID
                 button:SetAttribute("type", "item")
                 button:SetAttribute("item", "item:" .. tostring(entry.itemID))
@@ -1937,14 +2066,22 @@ function ACO:InitUI()
             ModeAutoBtn:SetBackdropColor(C.row.r, C.row.g, C.row.b, C.row.a)
             ModeAutoBtn:SetBackdropBorderColor(C.border.r, C.border.g, C.border.b, 1)
             OpenNextBtn:Hide()
-            AssistedOpenBtn:Show()
-            self:ConfigureAssistedButtons(ACO.assistedEntry)
+            if not (InCombatLockdown and InCombatLockdown()) then
+                AssistedOpenBtn:Show()
+                self:ConfigureAssistedButtons(ACO.assistedEntry)
+            else
+                self._secureQueueRefreshPending = true
+            end
         else
             ModeAutoBtn:SetBackdropColor(C.accent.r * 0.25, C.accent.g * 0.25, C.accent.b * 0.25, 0.9)
             ModeAutoBtn:SetBackdropBorderColor(C.accent.r, C.accent.g, C.accent.b, 1)
             ModeAssistedBtn:SetBackdropColor(C.row.r, C.row.g, C.row.b, C.row.a)
             ModeAssistedBtn:SetBackdropBorderColor(C.border.r, C.border.g, C.border.b, 1)
-            AssistedOpenBtn:Hide()
+            if not (InCombatLockdown and InCombatLockdown()) then
+                AssistedOpenBtn:Hide()
+            else
+                self._secureQueueRefreshPending = true
+            end
             OpenNextBtn:Show()
         end
         PauseQueueBtn.text:SetText(ACO.queuePaused and ACO:Translate("QUEUE_RESUME") or ACO:Translate("QUEUE_PAUSE"))
@@ -2022,9 +2159,13 @@ function ACO:InitUI()
         end
 
         if entry.failed then
-            local retryBtn = CreateModernButton(item, ACO:Translate("QUEUE_RETRY"), 72, 24, true)
+            local suggestAssisted = entry.reason == "NOT_CONSUMED" or entry.reason == "PROTECTED"
+            local retryBtn = CreateModernButton(item, ACO:Translate(suggestAssisted and "QUEUE_TRY_ASSISTED" or "QUEUE_RETRY"), suggestAssisted and 92 or 72, 24, true)
             retryBtn:SetPoint("RIGHT", removeBtn, "LEFT", -6, 0)
-            retryBtn:SetScript("OnClick", function() ACO:RetryFailedQueueEntry(entry.queueID) end)
+            retryBtn:SetScript("OnClick", function()
+                if suggestAssisted and not ACO:SetQueueMode("assisted") then return end
+                ACO:RetryFailedQueueEntry(entry.queueID)
+            end)
             status:ClearAllPoints()
             status:SetPoint("RIGHT", retryBtn, "LEFT", -8, 0)
         end
@@ -2062,11 +2203,18 @@ function ACO:InitUI()
         end
 
         local snapshot = ACO:GetQueueSnapshot()
+        local filter = (ACO.db.ui and ACO.db.ui.queueFilter) or "all"
         local index = 1
         for _, entry in ipairs(snapshot) do
-            local listItem = CreatePendingItem(entry, index)
-            tinsert(self.pendingListItems, listItem)
-            index = index + 1
+            local show = filter == "all"
+                or (filter == "failed" and entry.failed)
+                or (filter == "blocked" and entry.status == "BLOCKED")
+                or (filter == "active" and not entry.failed and entry.status ~= "BLOCKED")
+            if show then
+                local listItem = CreatePendingItem(entry, index)
+                tinsert(self.pendingListItems, listItem)
+                index = index + 1
+            end
         end
         local count = index - 1
         EmptyQueueText:SetShown(count == 0)
@@ -2088,6 +2236,8 @@ function ACO:InitUI()
             QueueStatusText:SetTextColor(C.textDim.r, C.textDim.g, C.textDim.b)
         end
         self:UpdateQueueModeControls()
+        self:UpdateQueueProfileControls()
+        UpdateQueueFilterButtons()
     end
 
     local pendingRefreshElapsed = 0
@@ -2924,12 +3074,28 @@ function ACO:InitUI()
 
     local QueueWidget = CreateFrame("Frame", "ACOQueueWidget", UIParent, "BackdropTemplate")
     QueueWidget:SetSize(320, 85)
-    QueueWidget:SetPoint("BOTTOM", UIParent, "BOTTOM", 0, 200)
+    local savedQueueWidget = ACO.db and ACO.db.ui and ACO.db.ui.queueWidget or nil
+    if savedQueueWidget then
+        QueueWidget:SetPoint(savedQueueWidget.point or "BOTTOM", UIParent, savedQueueWidget.relativePoint or "BOTTOM", savedQueueWidget.x or 0, savedQueueWidget.y or 200)
+    else
+        QueueWidget:SetPoint("BOTTOM", UIParent, "BOTTOM", 0, 200)
+    end
     QueueWidget:SetMovable(true)
     QueueWidget:EnableMouse(true)
     QueueWidget:RegisterForDrag("LeftButton")
     QueueWidget:SetScript("OnDragStart", QueueWidget.StartMoving)
-    QueueWidget:SetScript("OnDragStop", QueueWidget.StopMovingOrSizing)
+    QueueWidget:SetScript("OnDragStop", function(self)
+        self:StopMovingOrSizing()
+        if ACO.db and ACO.db.ui then
+            local point, _, relativePoint, x, y = self:GetPoint(1)
+            ACO.db.ui.queueWidget = {
+                point = point or "BOTTOM",
+                relativePoint = relativePoint or "BOTTOM",
+                x = x or 0,
+                y = y or 200,
+            }
+        end
+    end)
     QueueWidget:SetClampedToScreen(true)
     QueueWidget:SetFrameStrata("HIGH")
     ApplyBackdrop(QueueWidget, C.bg, C.accent)
@@ -3089,6 +3255,14 @@ function ACO:InitUI()
     -- OnUpdate: refresh widget state
     local qwUpdateElapsed = 0
     QueueWidget:SetScript("OnUpdate", function(self, elapsed)
+        if not (ACO.db and ACO.db.ui and ACO.db.ui.queueWidgetEnabled) then
+            if not (InCombatLockdown and InCombatLockdown()) then
+                self:Hide()
+            else
+                UI._secureQueueRefreshPending = true
+            end
+            return
+        end
         qwUpdateElapsed = qwUpdateElapsed + elapsed
         if qwUpdateElapsed < 0.05 then return end
         qwUpdateElapsed = 0
@@ -3098,10 +3272,18 @@ function ACO:InitUI()
         local assistedMode = ACO:GetQueueMode() == "assisted"
         if assistedMode then
             qwBarBg:Hide()
-            qwAssistedBtn:Show()
-            if UI.ConfigureAssistedButtons then UI:ConfigureAssistedButtons(ACO.assistedEntry) end
+            if not (InCombatLockdown and InCombatLockdown()) then
+                qwAssistedBtn:Show()
+                if UI.ConfigureAssistedButtons then UI:ConfigureAssistedButtons(ACO.assistedEntry) end
+            else
+                UI._secureQueueRefreshPending = true
+            end
         else
-            qwAssistedBtn:Hide()
+            if not (InCombatLockdown and InCombatLockdown()) then
+                qwAssistedBtn:Hide()
+            else
+                UI._secureQueueRefreshPending = true
+            end
             qwBarBg:Show()
         end
 

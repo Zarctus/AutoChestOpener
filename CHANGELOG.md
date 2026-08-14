@@ -1,5 +1,58 @@
 # Auto Chest Opener
 
+## 3.2.0 — Reliability First
+
+### Confirmation et sérialisation
+- La file ne lance plus une seconde utilisation tant que la précédente n'est pas confirmée ou déclarée en échec.
+- Une ouverture reste comptabilisée uniquement après diminution réelle de la quantité du conteneur dans les sacs.
+- Les retries ne peuvent plus finaliser prématurément un lot entre deux tentatives.
+- Les objets restant verrouillés trop longtemps se terminent en `LOCKED_TIMEOUT` au lieu d'entrer dans une boucle de réouverture.
+- Le nombre de contrôles de verrouillage est désormais borné et configurable par profil.
+
+### Respect strict des actions protégées
+- Suppression du fallback caché qui tentait un `SecureActionButton:Click()` programmatique après un refus de `C_Container.UseContainerItem`.
+- Le mode automatique utilise uniquement l'API publique puis vérifie le résultat.
+- Quand une action matérielle est nécessaire, le mode Assisté reste le seul chemin sécurisé : bouton visible `SecureActionButtonTemplate` déclenché par le joueur.
+- Les attributs, états et visibilités des boutons sécurisés ne sont plus reconfigurés en combat ; la synchronisation est différée jusqu'à `PLAYER_REGEN_ENABLED`.
+- Une file assistée déjà armée ne peut pas être annulée ou changer de mode en combat si cela laisserait une action sécurisée obsolète.
+
+### Circuit anti-boucle
+- Statistiques par conteneur enrichies avec échecs consécutifs et expiration du circuit de sécurité.
+- Après le seuil du profil, les nouvelles tentatives automatiques de ce conteneur sont temporairement suspendues.
+- Les entrées automatiques sœurs déjà dans la file sont retirées pour éviter de répéter la même panne.
+- Un succès confirmé réarme automatiquement le conteneur.
+- Un retry demandé explicitement par le joueur reste possible, notamment via le mode Assisté.
+
+### Profils de sécurité
+- Ajout des profils **Prudent**, **Normal** et **Rapide**.
+- Les anciennes installations 3.1 migrent en **Personnalisé** afin de conserver exactement leurs délais et paramètres existants.
+- Le profil agit sur cadence, délai de vérification, retry, contrôles de verrouillage, arrêt sur erreur et circuit anti-boucle.
+- Le délai utilisateur par conteneur reste indépendant des profils.
+
+### Centre de file
+- La vérification active est affichée avant la file restante afin de refléter ce que fait réellement l'addon.
+- ETA recalculé sur le fonctionnement sérialisé.
+- Filtres : Tout, Actifs, Bloqués, Échecs.
+- Les raisons d'exclusion de `Ouvrir tout` sont maintenant affichées au lieu d'un message ambigu.
+- En cas de `NOT_CONSUMED` ou `PROTECTED`, l'action proposée dans les échecs bascule vers un retry Assisté explicite.
+
+### Règles et widget
+- Import/export versionné de toutes les règles au format `ACORULES1`.
+- Les notes et sources sont échappées pour préserver les caractères spéciaux.
+- Les blocages temporaires sont exportés sous forme de durée restante.
+- Widget compact rendu réellement facultatif et désactivé par défaut sur une nouvelle installation.
+- Position du widget persistante dans les SavedVariables.
+
+### SavedVariables et Retail 12.1
+- Migration du schéma **4 → 5**, sans suppression des conteneurs, blacklist, statistiques, historique, loot ou règles existantes.
+- Les valeurs monétaires potentiellement inaccessibles sont ignorées plutôt que utilisées dans une opération arithmétique.
+- Interface Retail conservée à `120100`.
+
+### Roadmap volontairement repoussée
+- L'export CSV de l'historique est différé : utile pour l'analyse, mais sans effet sur la fiabilité d'ouverture.
+- Aucun tri cosmétique de la file n'est ajouté s'il risque de masquer l'ordre réel d'exécution.
+- Pas de nouvelle fenêtre flottante : le widget existant suffit et reste optionnel.
+
 ## 3.1.1 — Retail 12.1.0 / Interface 120100
 
 ### Compatibilité 12.1

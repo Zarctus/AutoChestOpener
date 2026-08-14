@@ -12,3 +12,4 @@ ignore:
   - ROADMAP_*.md
   - TESTING.md
   - COMPAT_*.md
+  - RELEASE_GUIDE.md

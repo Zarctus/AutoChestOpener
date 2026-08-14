@@ -1,7 +1,7 @@
 --[[
     Auto Chest Opener - Core Module
     Automatically opens all types of containers, chests, bags, crates, lockboxes, gifts and more
-    Version: 3.1.1
+    Version: 3.2.0
 ]]
 
 local addonName, ACO = ...
@@ -46,17 +46,22 @@ local function IsAccessibleValue(value)
     return true
 end
 
--- ============================================================================
--- SECURE ACTION BUTTON (Midnight 12.0+ compatibility)
--- UseContainerItem is now protected; we use SecureActionButtonTemplate
--- with type="item" to open containers via a programmatic secure click.
--- ============================================================================
+local function SafeGetMoney()
+    if not GetMoney then return nil end
+    local value = GetMoney()
+    if not IsAccessibleValue(value) or type(value) ~= "number" then
+        return nil
+    end
+    return value
+end
 
-local secureBtn = CreateFrame("Button", "ACOSecureOpenButton", UIParent, "SecureActionButtonTemplate")
-secureBtn:SetSize(1, 1)
-secureBtn:SetPoint("TOPLEFT", UIParent, "TOPLEFT", -100, 100)
-secureBtn:Hide()
-secureBtn:RegisterForClicks("AnyUp", "AnyDown")
+-- ============================================================================
+-- PROTECTED ACTION POLICY (Retail 12.1+)
+-- ============================================================================
+-- Automatic mode only calls Blizzard's public container API and then verifies
+-- that the stack actually decreased. There is deliberately no programmatic
+-- SecureActionButton:Click() fallback: when a hardware click is required, the
+-- visible assisted-mode SecureActionButton in UI.lua is the only secure path.
 
 -- ============================================================================
 -- ADDON INITIALIZATION
@@ -70,7 +75,7 @@ local tocVersion = (C_AddOns and C_AddOns.GetAddOnMetadata and C_AddOns.GetAddOn
 if tocVersion == "@project-version@" then
     tocVersion = nil
 end
-ACO.version = (tocVersion and tocVersion ~= "") and tocVersion or "3.1.1"
+ACO.version = (tocVersion and tocVersion ~= "") and tocVersion or "3.2.0"
 ACO.pendingItems = {}
 ACO.itemQueue = {}
 ACO.goldTracker = {
@@ -264,7 +269,7 @@ ACO.lastBagCountsByBag = {} -- [bagID] = { [itemID] = totalCountInBag }
 ACO.bagSlotsByBag = {}      -- [bagID] = { [itemID] = { {slot=, hyperlink=}... } }
 
 -- Default settings
-ACO.DB_SCHEMA_VERSION = 4
+ACO.DB_SCHEMA_VERSION = 5
 ACO.SUPPORTED_INTERFACE = 120100
 
 local defaults = {
@@ -293,15 +298,21 @@ local defaults = {
         lastTab = "containers",
         search = "",
         listView = "tracked",
+        queueFilter = "all",
+        queueWidgetEnabled = false,
+        queueWidget = { point = "BOTTOM", relativePoint = "BOTTOM", x = 0, y = 200 },
     },
     queue = {
         mode = "auto",       -- "auto" or "assisted" (real hardware click)
-        interval = 0.30,
-        verifyDelay = 1.50,
-        retryDelay = 0.60,
-        maxRetries = 2,
+        profile = "normal",  -- prudent | normal | fast | custom
+        interval = 0.35,
+        verifyDelay = 1.75,
+        retryDelay = 0.80,
+        maxRetries = 1,
         maxLockedChecks = 4,
         stopOnError = false,
+        failureThreshold = 2,
+        failureCooldown = 300,
     },
     diagnostics = {
         failedOpenAttempts = 0,
@@ -368,6 +379,7 @@ end
 function ACO:MigrateDatabase(db)
     if type(db) ~= "table" then db = {} end
 
+    local databaseWasEmpty = next(db) == nil
     local previousSchema = tonumber(db.schemaVersion) or 0
 
     -- Legacy releases stored several set-like tables with string keys after
@@ -387,7 +399,17 @@ function ACO:MigrateDatabase(db)
     db.queue.retryDelay = max(0.25, min(5.00, tonumber(db.queue.retryDelay) or defaults.queue.retryDelay))
     db.queue.maxRetries = max(0, min(5, floor(tonumber(db.queue.maxRetries) or defaults.queue.maxRetries)))
     db.queue.maxLockedChecks = max(1, min(10, floor(tonumber(db.queue.maxLockedChecks) or defaults.queue.maxLockedChecks)))
+    db.queue.failureThreshold = max(1, min(5, floor(tonumber(db.queue.failureThreshold) or defaults.queue.failureThreshold)))
+    db.queue.failureCooldown = max(30, min(3600, floor(tonumber(db.queue.failureCooldown) or defaults.queue.failureCooldown)))
     if db.queue.mode ~= "auto" and db.queue.mode ~= "assisted" then db.queue.mode = "auto" end
+    local validProfiles = { prudent = true, normal = true, fast = true, custom = true }
+    if previousSchema < 5 and not databaseWasEmpty then
+        -- Existing 3.1 installations keep their exact timings instead of being
+        -- silently overwritten by a new preset.
+        db.queue.profile = "custom"
+    elseif not validProfiles[db.queue.profile] then
+        db.queue.profile = defaults.queue.profile
+    end
     db.queue.stopOnError = db.queue.stopOnError and true or false
     db.ui.width = max(820, min(1200, tonumber(db.ui.width) or defaults.ui.width))
     db.ui.height = max(680, min(950, tonumber(db.ui.height) or defaults.ui.height))
@@ -403,6 +425,15 @@ function ACO:MigrateDatabase(db)
     local validTabs = { containers = true, stats = true, history = true, pending = true, loot = true }
     if not validTabs[db.ui.lastTab] then db.ui.lastTab = "containers" end
     if db.ui.listView ~= "tracked" and db.ui.listView ~= "blocked" then db.ui.listView = "tracked" end
+    local validQueueFilters = { all = true, active = true, blocked = true, failed = true }
+    if not validQueueFilters[db.ui.queueFilter] then db.ui.queueFilter = "all" end
+    db.ui.queueWidgetEnabled = db.ui.queueWidgetEnabled and true or false
+    if type(db.ui.queueWidget) ~= "table" then db.ui.queueWidget = DeepCopyValue(defaults.ui.queueWidget) end
+    if not validPoints[db.ui.queueWidget.point] or not validPoints[db.ui.queueWidget.relativePoint] then
+        db.ui.queueWidget = DeepCopyValue(defaults.ui.queueWidget)
+    end
+    db.ui.queueWidget.x = tonumber(db.ui.queueWidget.x) or defaults.ui.queueWidget.x
+    db.ui.queueWidget.y = tonumber(db.ui.queueWidget.y) or defaults.ui.queueWidget.y
     db.ui.search = tostring(db.ui.search or "")
     db.stats.itemsOpened = NormalizeNumericKeySet(db.stats.itemsOpened)
     db.lootSummary = NormalizeNumericKeySet(db.lootSummary)
@@ -433,6 +464,8 @@ function ACO:MigrateDatabase(db)
             stat.lastSuccess = tonumber(stat.lastSuccess)
             stat.lastFailure = tonumber(stat.lastFailure)
             stat.lastFailureReason = stat.lastFailureReason and tostring(stat.lastFailureReason) or nil
+            stat.consecutiveFailures = max(0, floor(tonumber(stat.consecutiveFailures) or 0))
+            stat.circuitBlockedUntil = max(0, tonumber(stat.circuitBlockedUntil) or 0)
         end
     end
     while #db.diagnostics.failureHistory > 50 do tremove(db.diagnostics.failureHistory, 1) end
@@ -594,7 +627,7 @@ function ACO:GetContainerDiagnostic(itemID, create)
     itemID = tonumber(itemID)
     local stat = self.db.containerStats[itemID]
     if not stat and create then
-        stat = { success = 0, failed = 0 }
+        stat = { success = 0, failed = 0, consecutiveFailures = 0, circuitBlockedUntil = 0 }
         self.db.containerStats[itemID] = stat
     end
     return stat
@@ -609,6 +642,11 @@ function ACO:CanProcessByRule(itemID, source)
     if not self:IsAutomaticQueueSource(source) then return true end
     if rule.autoOpen == false then return false, "RULE_DISABLED" end
     if (rule.temporaryBlockUntil or 0) > time() then return false, "TEMP_BLOCK" end
+    local stat = self:GetContainerDiagnostic(itemID, false)
+    if stat then
+        if (stat.circuitBlockedUntil or 0) > time() then return false, "FAILURE_COOLDOWN" end
+        if (stat.circuitBlockedUntil or 0) > 0 then stat.circuitBlockedUntil = 0 end
+    end
     local limit = tonumber(rule.maxPerSession) or 0
     if limit > 0 and (self.sessionOpenCounts[itemID] or 0) >= limit then
         return false, "SESSION_LIMIT"
@@ -685,6 +723,7 @@ function ACO:GetQueueReasonText(reason)
         LOCKED_TIMEOUT = "QUEUE_REASON_LOCKED_TIMEOUT",
         PROTECTED = "QUEUE_REASON_PROTECTED",
         MISSING = "QUEUE_REASON_MISSING",
+        FAILURE_COOLDOWN = "QUEUE_REASON_FAILURE_COOLDOWN",
     }
     return keys[reason] and self:Translate(keys[reason]) or tostring(reason)
 end
@@ -692,6 +731,12 @@ end
 
 function ACO:SetQueueMode(mode)
     if not self.db or not self.db.queue then return false end
+    -- Do not change secure-assisted state during combat. Attributes/visibility of
+    -- protected buttons are intentionally left untouched until combat ends.
+    if InCombatLockdown and InCombatLockdown() then
+        self:Print(self:Translate("SECURE_CLICK_COMBAT"), true)
+        return false
+    end
     mode = mode == "assisted" and "assisted" or "auto"
     if self.db.queue.mode == mode then return true end
     self.db.queue.mode = mode
@@ -701,6 +746,67 @@ function ACO:SetQueueMode(mode)
     self:StartQueueWorker()
     self:NotifyQueueChanged()
     return true
+end
+
+ACO.QUEUE_PROFILES = {
+    prudent = { interval = 0.60, verifyDelay = 2.25, retryDelay = 1.25, maxRetries = 1, maxLockedChecks = 5, stopOnError = true,  failureThreshold = 1, failureCooldown = 600 },
+    normal  = { interval = 0.35, verifyDelay = 1.75, retryDelay = 0.80, maxRetries = 1, maxLockedChecks = 4, stopOnError = false, failureThreshold = 2, failureCooldown = 300 },
+    fast    = { interval = 0.25, verifyDelay = 1.25, retryDelay = 0.50, maxRetries = 1, maxLockedChecks = 3, stopOnError = false, failureThreshold = 2, failureCooldown = 180 },
+}
+
+function ACO:GetQueueProfile()
+    return (self.db and self.db.queue and self.db.queue.profile) or "normal"
+end
+
+function ACO:ApplyQueueProfile(profile)
+    if not self.db or not self.db.queue then return false end
+    profile = lower(tostring(profile or ""))
+    local preset = self.QUEUE_PROFILES[profile]
+    if not preset then return false end
+    for key, value in pairs(preset) do self.db.queue[key] = value end
+    self.db.queue.profile = profile
+    self.queueOpenInterval = self.db.queue.interval
+    self:NotifyQueueChanged()
+    if self.UI and self.UI.UpdateQueueProfileControls then self.UI:UpdateQueueProfileControls() end
+    return true
+end
+
+function ACO:MarkQueueProfileCustom()
+    if self.db and self.db.queue then self.db.queue.profile = "custom" end
+end
+
+function ACO:GetFailureCircuitRemaining(itemID)
+    local stat = self:GetContainerDiagnostic(itemID, false)
+    if not stat then return 0 end
+    return max(0, (tonumber(stat.circuitBlockedUntil) or 0) - time())
+end
+
+function ACO:FormatQueueETA(seconds)
+    seconds = max(0, floor(tonumber(seconds) or 0))
+    if seconds >= 3600 then return format("%dh%02dm", floor(seconds / 3600), floor((seconds % 3600) / 60)) end
+    if seconds >= 60 then return format("%dm%02ds", floor(seconds / 60), seconds % 60) end
+    return format("%ds", seconds)
+end
+
+function ACO:ClearFailureCircuit(itemID)
+    local stat = self:GetContainerDiagnostic(itemID, false)
+    if not stat then return end
+    stat.consecutiveFailures = 0
+    stat.circuitBlockedUntil = 0
+end
+
+function ACO:SuspendAutomaticQueueForItem(itemID)
+    local removed = 0
+    for i = #self.openQueue, 1, -1 do
+        local queued = self.openQueue[i]
+        if queued.itemID == itemID and self:IsAutomaticQueueSource(queued.origin or queued.source) then
+            if self.assistedEntry and self.assistedEntry.queueID == queued.queueID then self.assistedEntry = nil end
+            tremove(self.openQueue, i)
+            removed = removed + 1
+        end
+    end
+    if removed > 0 then self:Debug(format("Circuit anti-boucle: %d entrée(s) automatiques retirée(s) pour %d", removed, itemID)) end
+    return removed
 end
 
 -- ============================================================================
@@ -1328,50 +1434,22 @@ function ACO:UseContainerFromBagSlot(itemID, bag, slot, itemLink)
     local lootTracker = self:StartLootTracking(itemID)
 
     local apiOk, apiErr = pcall(C_Container.UseContainerItem, bag, slot)
-    local issued = apiOk
     if not apiOk then
-        self:Debug("C_Container.UseContainerItem failed: " .. tostring(apiErr))
-        issued = self:UseItemSecure(itemID, bag, slot)
-    end
-
-    if not issued then
+        self:Debug("C_Container.UseContainerItem refused/failed: " .. tostring(apiErr))
         if lootTracker then lootTracker.cancelled = true end
+        -- Do not attempt a programmatic secure click. A visible hardware-click
+        -- SecureActionButton is available exclusively through assisted mode.
         return false, "PROTECTED"
     end
 
     return true, nil, lootTracker, info
 end
 
--- Best-effort secure button fallback.
--- Important: a programmatic Button:Click() is not a guaranteed replacement for a
--- real hardware click on modern clients. The post-use verifier decides whether
--- the item was actually consumed.
-function ACO:UseItemSecure(itemID, bag, slot)
-    if InCombatLockdown() then
-        self:Print(ACO:Translate("SECURE_CLICK_COMBAT"), true)
-        return false
-    end
-    local btn = secureBtn
-    if bag and slot then
-        btn:SetAttribute("type", "macro")
-        btn:SetAttribute("macrotext", format("/use %d %d", bag, slot))
-    else
-        btn:SetAttribute("type", "item")
-        btn:SetAttribute("item", "item:" .. itemID)
-    end
-    btn:Show()
-    btn:Click()
-    -- Delay Hide by one frame so the secure action has time to execute before
-    -- the button is hidden (hiding synchronously can cancel the pending action).
-    C_Timer.After(0, function() btn:Hide() end)
-    return true
-end
-
 function ACO:StartQueueWorker()
     if self.queueTicker or #self.openQueue == 0 then return end
 
-    if self.UI and self.UI.queueWidget then
-        self.UI.queueWidget:Show()
+    if self.UI and self.UI.SetQueueWidgetVisible and self.db and self.db.ui and self.db.ui.queueWidgetEnabled then
+        self.UI:SetQueueWidgetVisible(true)
     end
 
     local selfRef = self
@@ -1394,8 +1472,8 @@ function ACO:FinalizeQueueCycle()
         self:PrintBatchSummary()
     end
 
-    if self.UI and self.UI.queueWidget then
-        self.UI.queueWidget:Hide()
+    if self.UI and self.UI.SetQueueWidgetVisible then
+        self.UI:SetQueueWidgetVisible(false)
     end
 
     self.queueSessionOpened = 0
@@ -1416,8 +1494,9 @@ function ACO:PrintBatchSummary()
 
     if bt.count == 0 then return end
 
-    local goldAfter = GetMoney()
-    local goldGained = goldAfter - bt.goldBefore
+    local goldAfter = SafeGetMoney()
+    local goldBefore = IsAccessibleValue(bt.goldBefore) and type(bt.goldBefore) == "number" and bt.goldBefore or nil
+    local goldGained = (goldAfter and goldBefore) and (goldAfter - goldBefore) or 0
     local elapsed = GetTime() - bt.startTime
 
     local msg = format(ACO:Translate("BATCH_SUMMARY"), bt.count, bt.totalQueued)
@@ -1447,6 +1526,13 @@ function ACO:ResumeQueue()
 end
 
 function ACO:CancelQueue(clearFailures)
+    -- If an assisted SecureActionButton is already armed, clearing the logical
+    -- queue in combat would leave a stale protected action that cannot legally
+    -- be reconfigured until combat ends. Refuse the operation instead.
+    if self.assistedEntry and InCombatLockdown and InCombatLockdown() then
+        self:Print(self:Translate("SECURE_CLICK_COMBAT"), true)
+        return false
+    end
     wipe(self.openQueue)
     wipe(self.activeVerifications)
     wipe(self.combatQueue)
@@ -1459,6 +1545,7 @@ function ACO:CancelQueue(clearFailures)
     if self.UI and self.UI.ConfigureAssistedButtons then self.UI:ConfigureAssistedButtons(nil) end
     self:StopQueueWorker()
     self:NotifyQueueChanged()
+    return true
 end
 
 function ACO:ClearQueueFailures()
@@ -1476,6 +1563,11 @@ end
 
 function ACO:RemoveQueueEntry(queueID)
     if not queueID then return false end
+    if self.assistedEntry and self.assistedEntry.queueID == queueID
+        and InCombatLockdown and InCombatLockdown() then
+        self:Print(self:Translate("SECURE_CLICK_COMBAT"), true)
+        return false
+    end
     for i = #self.openQueue, 1, -1 do
         if self.openQueue[i].queueID == queueID then
             tremove(self.openQueue, i)
@@ -1517,7 +1609,7 @@ function ACO:RetryFailedQueueEntry(queueID)
                 link = (info and info.hyperlink) or failure.link,
                 executeAt = GetTime(),
                 source = "MANUAL",
-                origin = failure.origin or "MANUAL",
+                origin = "MANUAL_RETRY",
                 attempt = 0,
                 lockTries = 0,
                 generation = self.queueGeneration or 0,
@@ -1611,9 +1703,24 @@ function ACO:RecordOpenFailure(entry, reason)
     diagnostics.lastFailureItemID = entry.itemID
 
     local perItem = self:GetContainerDiagnostic(entry.itemID, true)
+    local nowEpoch = time()
+    local previousFailureAt = tonumber(perItem.lastFailure) or 0
+    local cooldown = max(30, tonumber(self.db.queue.failureCooldown) or 300)
+    if previousFailureAt > 0 and (nowEpoch - previousFailureAt) > cooldown then
+        perItem.consecutiveFailures = 0
+    end
     perItem.failed = (perItem.failed or 0) + 1
-    perItem.lastFailure = time()
+    perItem.lastFailure = nowEpoch
     perItem.lastFailureReason = reason
+    perItem.consecutiveFailures = (perItem.consecutiveFailures or 0) + 1
+
+    local threshold = max(1, tonumber(self.db.queue.failureThreshold) or 2)
+    if perItem.consecutiveFailures >= threshold and self:IsAutomaticQueueSource(entry.origin or entry.source) then
+        perItem.circuitBlockedUntil = nowEpoch + cooldown
+        diagnostics.lastCircuitItemID = entry.itemID
+        diagnostics.lastCircuitUntil = perItem.circuitBlockedUntil
+        self:SuspendAutomaticQueueForItem(entry.itemID)
+    end
 
     local failure = {
         queueID = entry.queueID or self:NextQueueID(),
@@ -1656,6 +1763,8 @@ function ACO:ConfirmOpenSuccess(entry)
     local perItem = self:GetContainerDiagnostic(entry.itemID, true)
     perItem.success = (perItem.success or 0) + 1
     perItem.lastSuccess = time()
+    perItem.consecutiveFailures = 0
+    perItem.circuitBlockedUntil = 0
 
     if self.batchTracker.active and entry.origin == "OPENALL" then
         self.batchTracker.count = self.batchTracker.count + 1
@@ -1672,14 +1781,14 @@ function ACO:ConfirmOpenSuccess(entry)
     self:NotifyQueueChanged()
 end
 
-function ACO:FinishOpenVerification(entry)
+function ACO:FinishOpenVerification(entry, skipFinalize)
     if entry and entry._verificationFinished then return end
     if entry then
         entry._verificationFinished = true
         if entry.queueID then self.activeVerifications[entry.queueID] = nil end
     end
     self.pendingVerifications = max(0, (self.pendingVerifications or 0) - 1)
-    self:FinalizeQueueCycle()
+    if not skipFinalize then self:FinalizeQueueCycle() end
     self:NotifyQueueChanged()
 end
 
@@ -1716,11 +1825,17 @@ function ACO:ScheduleOpenVerification(entry, countBefore)
             return
         end
 
-        if info and info.isLocked and lockCheck < maxLockedChecks then
-            entry.status = "VERIFYING"
-            entry.statusReason = "LOCKED"
-            selfRef:NotifyQueueChanged()
-            C_Timer.After(0.75, function() Verify(lockCheck + 1) end)
+        if info and info.isLocked then
+            if lockCheck < maxLockedChecks then
+                entry.status = "VERIFYING"
+                entry.statusReason = "LOCKED"
+                selfRef:NotifyQueueChanged()
+                C_Timer.After(0.75, function() Verify(lockCheck + 1) end)
+                return
+            end
+            if entry.lootTracker then entry.lootTracker.cancelled = true end
+            selfRef:RecordOpenFailure(entry, "LOCKED_TIMEOUT")
+            selfRef:FinishOpenVerification(entry)
             return
         end
 
@@ -1746,7 +1861,8 @@ function ACO:ScheduleOpenVerification(entry, countBefore)
                 queuedAt = entry.queuedAt or GetTime(),
             }
             selfRef:Debug(format("Item %d non consommé, tentative %d/%d", entry.itemID, retryEntry.attempt, maxRetries))
-            selfRef:FinishOpenVerification(entry)
+            -- Do not finalize the batch between an attempt and its retry.
+            selfRef:FinishOpenVerification(entry, true)
             selfRef:InsertOpenQueueEntry(retryEntry)
             selfRef:StartQueueWorker()
             return
@@ -1849,7 +1965,29 @@ function ACO:GetQueueSnapshot()
     local snapshot = {}
     local now = GetTime()
     local blocked, blockReason = self:IsOpeningBlocked()
+    local verifyDuration = self.db.queue.verifyDelay or 1.5
+    local serviceDuration = max(self.db.queue.interval or 0.30, verifyDuration)
     local cumulative = 0
+
+    -- The action currently awaiting confirmation is always displayed first.
+    -- 3.2 serializes verification, so there should normally be at most one.
+    for _, entry in pairs(self.activeVerifications) do
+        local remaining = max(0, (entry.verifyStartedAt or now) + verifyDuration - now)
+        tinsert(snapshot, {
+            queueID = entry.queueID,
+            itemID = entry.itemID,
+            link = entry.link,
+            status = entry.status or "VERIFYING",
+            reason = entry.statusReason,
+            attempt = entry.attempt or 0,
+            source = entry.origin or entry.source,
+            priority = entry.priority or 0,
+            eta = remaining,
+            active = true,
+            failed = false,
+        })
+        cumulative = max(cumulative, remaining)
+    end
 
     for index, entry in ipairs(self.openQueue) do
         local status = entry.status or "QUEUED"
@@ -1869,7 +2007,7 @@ function ACO:GetQueueSnapshot()
         end
         cumulative = max(cumulative, wait)
         local entryETA = cumulative
-        cumulative = cumulative + (self.db.queue.interval or 0.30)
+        cumulative = cumulative + serviceDuration
         tinsert(snapshot, {
             queueID = entry.queueID,
             itemID = entry.itemID,
@@ -1880,22 +2018,6 @@ function ACO:GetQueueSnapshot()
             source = entry.origin or entry.source,
             priority = entry.priority or 0,
             eta = entryETA,
-            failed = false,
-        })
-    end
-
-    for _, entry in pairs(self.activeVerifications) do
-        tinsert(snapshot, {
-            queueID = entry.queueID,
-            itemID = entry.itemID,
-            link = entry.link,
-            status = entry.status or "VERIFYING",
-            reason = entry.statusReason,
-            attempt = entry.attempt or 0,
-            source = entry.origin or entry.source,
-            priority = entry.priority or 0,
-            eta = max(0, (entry.verifyStartedAt or now) + (self.db.queue.verifyDelay or 1.5) - now),
-            active = true,
             failed = false,
         })
     end
@@ -1919,6 +2041,9 @@ end
 
 function ACO:ProcessAssistedQueueTick()
     if self.queuePaused or #self.openQueue == 0 then return end
+    -- Reliability first: never prepare a second protected action while another
+    -- container is still awaiting consumption confirmation.
+    if (self.pendingVerifications or 0) > 0 then return end
     if self.assistedEntry then return end
 
     local now = GetTime()
@@ -1963,6 +2088,10 @@ function ACO:ProcessQueueTick()
     end
 
     if self.queuePaused then return end
+    -- Only one item action may be in verification at a time. Without this, a
+    -- stack decrease caused by action A could incorrectly confirm action B.
+    -- This serialization is intentionally slower and makes confirmation exact.
+    if (self.pendingVerifications or 0) > 0 then return end
     if self:GetQueueMode() == "assisted" then
         self:ProcessAssistedQueueTick()
         return
@@ -2045,7 +2174,8 @@ function ACO:ProcessQueueTick()
 
     if reason == "LOCKED" then
         entry.lockTries = (entry.lockTries or 0) + 1
-        if entry.lockTries <= 25 then
+        local maxLockedChecks = (self.db and self.db.queue and self.db.queue.maxLockedChecks) or 4
+        if entry.lockTries <= maxLockedChecks then
             entry.status = "BLOCKED"
             entry.statusReason = "LOCKED"
             entry.executeAt = now + 0.4
@@ -2080,6 +2210,9 @@ function ACO:QueueItem(itemID, itemLink, bag, slot, count, source)
     local allowed, ruleReason = self:CanEnqueueByRule(itemID, source)
     if not allowed then
         self:Debug(format("Item %d ignoré par règle: %s", itemID, tostring(ruleReason)))
+        if self.db.showNotifications then
+            self:Print(format(self:Translate("QUEUE_SKIPPED_REASON"), itemLink or self:FormatItemLink(itemID), self:GetQueueReasonText(ruleReason)), true)
+        end
         return 0
     end
 
@@ -2119,24 +2252,34 @@ function ACO:OpenAllContainers()
         self:Print(ACO:Translate("OPEN_ALL_DEFERRED", self:GetBlockReasonText(reason)))
     end
 
-    local opened = 0
     local toOpen = {}
     local containers = self.db.containers
+    local skippedReasons = {}
+    local skippedTotal = 0
+    local function AddSkipped(reasonCode, count)
+        reasonCode = reasonCode or "UNKNOWN"
+        count = max(1, tonumber(count) or 1)
+        skippedReasons[reasonCode] = (skippedReasons[reasonCode] or 0) + count
+        skippedTotal = skippedTotal + count
+    end
 
-    -- Collect all containers in bags (tracked list + auto-detected openable items)
+    -- Collect all containers in bags (tracked list + auto-detected openable items).
+    -- Rules/circuit breakers are evaluated before entries are created so the
+    -- player gets an explicit explanation instead of a silently empty queue.
     for _, bag in ipairs(self:GetTrackedBags()) do
         local numSlots = C_Container.GetContainerNumSlots(bag) or 0
         for slot = 1, numSlots do
             local info = C_Container.GetContainerItemInfo(bag, slot)
             if info and info.itemID then
-                -- Include items from tracked list OR auto-detected as openable
                 if containers[info.itemID] or self:CanQueueContainerItem(info.itemID) then
-                    local allowed = self:CanEnqueueByRule(info.itemID, "OPENALL")
+                    local qty = max(1, tonumber(info.stackCount) or 1)
+                    local allowed, ruleReason = self:CanEnqueueByRule(info.itemID, "OPENALL")
                     if allowed then
-                        local qty = max(1, tonumber(info.stackCount) or 1)
                         for _ = 1, qty do
                             tinsert(toOpen, { bag = bag, slot = slot, itemID = info.itemID, link = info.hyperlink })
                         end
+                    else
+                        AddSkipped(ruleReason, qty)
                     end
                 end
             end
@@ -2144,30 +2287,48 @@ function ACO:OpenAllContainers()
     end
 
     if #toOpen == 0 then
-        self:Print(ACO:Translate("NO_CONTAINERS_FOUND"))
+        if skippedTotal > 0 then
+            for reasonCode, count in pairs(skippedReasons) do
+                self:Print(format(self:Translate("OPEN_ALL_SKIPPED_REASON"), count, self:GetQueueReasonText(reasonCode)), true)
+            end
+        else
+            self:Print(ACO:Translate("NO_CONTAINERS_FOUND"))
+        end
         return 0
     end
 
-    -- Enqueue with rule-aware priority and a small cadence between equal priorities.
+    -- Enqueue with rule-aware priority. The worker is serialized by verification
+    -- in 3.2, so executeAt is only an earliest-start time, not a promise to issue
+    -- multiple item actions before the previous one is confirmed.
     local delayBetween = self.db.queue.interval or 0.30
     local startAt = GetTime()
     local queued = 0
     for i, data in ipairs(toOpen) do
         local ruleDelay = self:GetContainerRule(data.itemID, false).delay
         local executeAt = startAt + (ruleDelay ~= nil and ruleDelay or ((i - 1) * delayBetween))
-        local ok = self:EnqueueOpen(data.itemID, data.bag, data.slot, data.link, executeAt, "OPENALL")
-        if ok then queued = queued + 1 end
+        local ok, enqueueReason = self:EnqueueOpen(data.itemID, data.bag, data.slot, data.link, executeAt, "OPENALL")
+        if ok then
+            queued = queued + 1
+        elseif enqueueReason then
+            AddSkipped(enqueueReason, 1)
+        end
     end
 
     if self.db.showNotifications then
         self:Print(ACO:Translate("OPEN_ALL_RESULT", queued))
+        if skippedTotal > 0 then
+            for reasonCode, count in pairs(skippedReasons) do
+                self:Print(format(self:Translate("OPEN_ALL_SKIPPED_REASON"), count, self:GetQueueReasonText(reasonCode)), true)
+            end
+        end
     end
 
-    -- Start batch tracking for summary notification
+    if queued <= 0 then return 0 end
+
     self.batchTracker.active = true
     self.batchTracker.count = 0
     self.batchTracker.totalQueued = queued
-    self.batchTracker.goldBefore = GetMoney()
+    self.batchTracker.goldBefore = SafeGetMoney()
     self.batchTracker.startTime = GetTime()
 
     return queued
@@ -2405,7 +2566,16 @@ end
 -- Start tracking gold for a specific container opening.
 -- Uses a queue so that rapid batch openings don't clobber each other.
 function ACO:StartGoldTracking(itemID, historyEntry, goldBefore)
-    local goldNow = tonumber(goldBefore) or GetMoney()
+    local goldNow = nil
+    if IsAccessibleValue(goldBefore) and type(goldBefore) == "number" then
+        goldNow = goldBefore
+    else
+        goldNow = SafeGetMoney()
+    end
+    if not goldNow then
+        self:Debug("Gold tracking skipped: GetMoney returned an inaccessible value")
+        return
+    end
 
     -- Try to finalize any already-pending trackers whose gold has arrived
     self:ProcessGoldTrackers(goldNow)
@@ -2422,13 +2592,14 @@ function ACO:StartGoldTracking(itemID, historyEntry, goldBefore)
 
     -- Schedule delayed processing (server-lag resilience)
     local selfRef = self
-    C_Timer.After(0.5, function() selfRef:ProcessGoldTrackers(GetMoney()) end)
-    C_Timer.After(1.5, function() selfRef:ProcessGoldTrackers(GetMoney()) end)
+    C_Timer.After(0.5, function() selfRef:ProcessGoldTrackers(SafeGetMoney()) end)
+    C_Timer.After(1.5, function() selfRef:ProcessGoldTrackers(SafeGetMoney()) end)
     C_Timer.After(5.0, function() selfRef:CleanupGoldTrackers() end)
 end
 
 -- Walk the tracker queue and finalise every entry whose gold delta is known.
 function ACO:ProcessGoldTrackers(goldNow)
+    if not IsAccessibleValue(goldNow) or type(goldNow) ~= "number" then return end
     local queue = self.goldTrackerQueue
     local i = 1
     while i <= #queue do
@@ -2482,7 +2653,7 @@ end
 -- Safety net: discard trackers that never received gold after a long timeout.
 function ACO:CleanupGoldTrackers()
     local queue = self.goldTrackerQueue
-    self:ProcessGoldTrackers(GetMoney())
+    self:ProcessGoldTrackers(SafeGetMoney())
 
     -- Each opening schedules cleanup. Never wipe the whole queue here: a newer
     -- batch entry may have been appended after an older timer was created.
@@ -2530,7 +2701,7 @@ function ACO:StartLootTracking(containerItemID)
     local tracker = {
         containerItemID = containerItemID,
         bagSnapshot     = self:TakeBagItemSnapshot(),
-        goldBefore      = GetMoney(),
+        goldBefore      = SafeGetMoney(),
         currencies      = {}, -- filled by CHAT_MSG_CURRENCY
         lootItems       = {}, -- filled by CHAT_MSG_LOOT
         timestamp       = GetTime(),
@@ -2575,7 +2746,7 @@ function ACO:ProcessLootTrackers()
                 goldAfter = nextConfirmed.goldBefore
             else
                 afterSnapshot = self:TakeBagItemSnapshot()
-                goldAfter = GetMoney()
+                goldAfter = SafeGetMoney()
             end
 
             -- Diff items: find what was gained
@@ -2594,9 +2765,14 @@ function ACO:ProcessLootTrackers()
                 end
             end
 
-            -- Gold diff
-            local goldGained = goldAfter - queue[i].goldBefore
-            if goldGained < 0 then goldGained = 0 end
+            -- Gold diff. Money values may be inaccessible on protected 12.1 paths;
+            -- item/currency loot remains valid even when the gold delta cannot be read.
+            local goldGained = 0
+            if IsAccessibleValue(goldAfter) and type(goldAfter) == "number"
+                and IsAccessibleValue(queue[i].goldBefore) and type(queue[i].goldBefore) == "number" then
+                goldGained = goldAfter - queue[i].goldBefore
+                if goldGained < 0 then goldGained = 0 end
+            end
 
             -- Finalize when we have data or enough time has passed
             local elapsed = GetTime() - queue[i].timestamp
@@ -3198,6 +3374,12 @@ events["PLAYER_REGEN_ENABLED"] = function(self)
         end
     end
     wipe(ACO.combatQueue)
+
+    -- Protected assisted buttons/widget visibility are deliberately not mutated
+    -- during combat. Apply the latest desired state now that it is safe.
+    if ACO.UI and ACO.UI.RefreshProtectedQueueUI then
+        ACO.UI:RefreshProtectedQueueUI()
+    end
 end
 
 -- ============================================================================
@@ -3605,15 +3787,53 @@ SlashCmdList["AUTOCHESTOPENER"] = function(msg)
     elseif cmd == "debug" then
         ACO.db.debugMode = not ACO.db.debugMode
         ACO:Print(string.format(ACO:Translate("DEBUG_MODE"), (ACO.db.debugMode and "on" or "off")))
+    elseif cmd == "profile" or cmd == "profil" then
+        local profile = lower(tostring(arg or ""))
+        if profile == "rapide" then profile = "fast" end
+        if profile == "prudent" or profile == "normal" or profile == "fast" then
+            ACO:ApplyQueueProfile(profile)
+            ACO:Print(format("Profil de file: %s", ACO:Translate("QUEUE_PROFILE_" .. string.upper(profile))))
+        else
+            ACO:Print("Usage: /aco profile prudent|normal|fast", true)
+        end
+    elseif cmd == "widget" then
+        local value = lower(tostring(arg or ""))
+        if value == "on" or value == "1" or value == "oui" then
+            ACO.db.ui.queueWidgetEnabled = true
+        elseif value == "off" or value == "0" or value == "non" then
+            ACO.db.ui.queueWidgetEnabled = false
+            if ACO.UI and ACO.UI.SetQueueWidgetVisible then ACO.UI:SetQueueWidgetVisible(false) end
+        else
+            ACO.db.ui.queueWidgetEnabled = not ACO.db.ui.queueWidgetEnabled
+            if not ACO.db.ui.queueWidgetEnabled and ACO.UI and ACO.UI.SetQueueWidgetVisible then ACO.UI:SetQueueWidgetVisible(false) end
+        end
+        if ACO.db.ui.queueWidgetEnabled and ACO.UI and ACO.UI.SetQueueWidgetVisible then
+            ACO.UI:SetQueueWidgetVisible(#ACO.openQueue > 0 or (ACO.pendingVerifications or 0) > 0)
+        end
+        ACO:Print("Widget compact: " .. (ACO.db.ui.queueWidgetEnabled and "activé" or "désactivé"))
     elseif cmd == "diag" or cmd == "diagnostics" then
         local blocked, reason = ACO:IsOpeningBlocked()
         local diagnostics = ACO.db.diagnostics or {}
-        ACO:Print("--- Diagnostics 3.1.1 / Retail 12.1.0 ---")
+        ACO:Print("--- Diagnostics 3.2.0 / Retail 12.1.0 ---")
         print(format("  Client: %s build %s (%s)", tostring(ACO.runtimeVersion or "?"), tostring(ACO.runtimeBuild or "?"), tostring(ACO.runtimeBuildDate or "?")))
         print(format("  Interface client: %d (cible: %d) %s", ACO.runtimeInterface or 0, ACO.SUPPORTED_INTERFACE, ACO.runtimeInterfaceMatches and "OK" or "MISMATCH"))
         print(format("  Schéma DB: %d", ACO.db.schemaVersion or 0))
-        print(format("  Mode: %s", ACO:GetQueueMode()))
+        print(format("  Mode: %s | profil: %s", ACO:GetQueueMode(), ACO:GetQueueProfile()))
         print(format("  File: %d en attente + %d vérification(s) + %d échec(s)", #ACO.openQueue, ACO.pendingVerifications or 0, #ACO.queueFailures))
+        print(format("  Vérification: %.2fs | retries: %d | verrou: %d | circuit: %d échec(s)/%ds", ACO.db.queue.verifyDelay or 0, ACO.db.queue.maxRetries or 0, ACO.db.queue.maxLockedChecks or 0, ACO.db.queue.failureThreshold or 0, ACO.db.queue.failureCooldown or 0))
+        print(format("  Widget compact: %s", ACO.db.ui.queueWidgetEnabled and "activé" or "désactivé"))
+        local circuits = 0
+        local circuitLines = {}
+        for itemID, stat in pairs(ACO.db.containerStats or {}) do
+            if (stat.circuitBlockedUntil or 0) > time() then
+                circuits = circuits + 1
+                if #circuitLines < 5 then
+                    tinsert(circuitLines, format("    - %s: %s", tostring(itemID), ACO:FormatQueueETA(stat.circuitBlockedUntil - time())))
+                end
+            end
+        end
+        print(format("  Circuits anti-boucle actifs: %d", circuits))
+        for _, line in ipairs(circuitLines) do print(line) end
         print(format("  État: %s", ACO.queuePaused and "pause" or (blocked and ("bloqué: " .. ACO:GetBlockReasonText(reason)) or "prêt")))
         print(format("  Échecs confirmés: %d", diagnostics.failedOpenAttempts or 0))
         if diagnostics.lastFailure then
@@ -3653,12 +3873,22 @@ SlashCmdList["AUTOCHESTOPENER"] = function(msg)
             ACO.UI:SwitchTab("pending")
         end
     elseif cmd == "rules" or cmd == "regles" or cmd == "règles" then
-        local itemID = tonumber(arg)
-        if itemID and ACO.UI and ACO.UI.ShowRuleEditor then
+        local action, payload = strsplit(" ", tostring(arg or ""), 2)
+        action = lower(action or "")
+        local itemID = tonumber(action)
+        if action == "export" then
+            ACO:ShowRulesExportFrame()
+        elseif action == "import" then
+            if payload and payload ~= "" then
+                ACO:ImportContainerRules(payload)
+            else
+                ACO:ShowRulesImportFrame()
+            end
+        elseif itemID and ACO.UI and ACO.UI.ShowRuleEditor then
             if ACO.UI.mainFrame then ACO.UI.mainFrame:Show() end
             ACO.UI:ShowRuleEditor(itemID)
         else
-            ACO:Print("Usage: /aco rules <itemID>", true)
+            ACO:Print("Usage: /aco rules <itemID>|export|import", true)
         end
     elseif cmd == "resetui" then
         local state = ACO.db.ui
@@ -3770,6 +4000,9 @@ SlashCmdList["AUTOCHESTOPENER"] = function(msg)
         print("  /aco next - Préparer/ouvrir le prochain conteneur")
         print("  /aco queue [clear|failures] - Gérer la file")
         print("  /aco rules <itemID> - Modifier les règles d'un conteneur")
+        print("  /aco rules export|import - Exporter/importer les règles")
+        print("  /aco profile prudent|normal|fast - Appliquer un profil de sécurité")
+        print("  /aco widget [on|off] - Afficher/masquer le widget compact")
         print("  /aco toggle - Activer/Désactiver")
         print("  /aco delay <secondes> - Régler le délai")
         print("  /aco stats - Afficher les statistiques")
@@ -3829,6 +4062,112 @@ function ACO:ImportContainers(importString, clearExisting)
     end
 
     return count
+end
+
+-- ========================================================================
+-- CONTAINER RULES EXPORT / IMPORT (ACORULES1)
+-- ========================================================================
+
+local function RuleEscape(text)
+    return tostring(text or ""):gsub("([^%w%-%._~])", function(char)
+        return format("%%%02X", string.byte(char))
+    end)
+end
+
+local function RuleUnescape(text)
+    return tostring(text or ""):gsub("%%(%x%x)", function(hex)
+        return string.char(tonumber(hex, 16))
+    end)
+end
+
+function ACO:ExportContainerRules()
+    if not self.db then return "" end
+    local ids = {}
+    for itemID in pairs(self.db.containerRules or {}) do tinsert(ids, tonumber(itemID)) end
+    for itemID in pairs(self.db.blacklist or {}) do
+        itemID = tonumber(itemID)
+        local found = false
+        for _, existing in ipairs(ids) do if existing == itemID then found = true break end end
+        if not found then tinsert(ids, itemID) end
+    end
+    table.sort(ids)
+
+    local lines = { "ACORULES1" }
+    for _, itemID in ipairs(ids) do
+        local rule = self:GetContainerRule(itemID, false)
+        local remaining = max(0, floor((rule.temporaryBlockUntil or 0) - time()))
+        tinsert(lines, table.concat({
+            tostring(itemID),
+            rule.autoOpen == false and "0" or "1",
+            rule.delay == nil and "-" or tostring(rule.delay),
+            tostring(rule.maxPerSession or 0),
+            tostring(rule.priority or 0),
+            tostring(remaining),
+            self.db.blacklist[itemID] and "1" or "0",
+            RuleEscape(rule.source),
+            RuleEscape(rule.note),
+        }, ";"))
+    end
+    return table.concat(lines, "\n")
+end
+
+function ACO:ImportContainerRules(text)
+    if not self.db or not text or text == "" then return 0 end
+    local header, body = tostring(text):match("^%s*(ACORULES1)%s*[\r\n]+(.+)$")
+    if not header or not body then
+        self:Print(self:Translate("RULES_IMPORT_INVALID"), true)
+        return 0
+    end
+
+    local imported = 0
+    for line in body:gmatch("[^\r\n]+") do
+        local id, autoOpen, delay, maxSession, priority, tempRemaining, blocked, source, note =
+            line:match("^(%d+);([01]);([^;]*);([^;]*);([^;]*);([^;]*);([01]);([^;]*);(.*)$")
+        id = tonumber(id)
+        if id and id > 0 then
+            local delayValue = delay ~= "-" and tonumber(delay) or nil
+            self.db.containers[id] = true
+            self:SetContainerRule(id, {
+                autoOpen = autoOpen ~= "0",
+                delay = delayValue,
+                clearDelay = delay == "-",
+                maxPerSession = tonumber(maxSession) or 0,
+                priority = tonumber(priority) or 0,
+                temporaryBlockUntil = time() + max(0, tonumber(tempRemaining) or 0),
+                source = RuleUnescape(source),
+                note = RuleUnescape(note),
+            })
+            if blocked == "1" then self.db.blacklist[id] = true else self.db.blacklist[id] = nil end
+            imported = imported + 1
+        end
+    end
+    if self.UI and self.UI.RefreshList then self.UI:RefreshList() end
+    self:Print(format(self:Translate("RULES_IMPORTED_COUNT"), imported))
+    return imported
+end
+
+function ACO:ShowRulesExportFrame()
+    local text = self:ExportContainerRules()
+    if text == "ACORULES1" then
+        self:Print(self:Translate("RULES_EXPORT_EMPTY"), true)
+        return
+    end
+    self:ShowLootExportFrame(text, "RULES_EXPORT_TITLE")
+end
+
+function ACO:ShowRulesImportFrame()
+    if not self.ExportFrame then self:CreateImportExportFrame() end
+    local frame = self.ExportFrame
+    frame.editBox:SetText("")
+    frame.title:SetText("|cff00ff80" .. self:Translate("RULES_IMPORT_TITLE") .. "|r")
+    frame.importHandler = function(text) return ACO:ImportContainerRules(text) end
+    frame.clearImportHandler = nil
+    frame.importBtn:Show()
+    frame.clearImportBtn:Hide()
+    frame.helpText:SetText(self:Translate("RULES_IMPORT_HELP"))
+    frame.helpText:Show()
+    frame:Show()
+    frame.editBox:SetFocus()
 end
 
 -- ========================================================================
@@ -3918,6 +4257,8 @@ function ACO:ShowLootExportFrame(text, titleKey)
         self:CreateImportExportFrame()
     end
     self.ExportFrame.editBox:SetText(text)
+    self.ExportFrame.importHandler = nil
+    self.ExportFrame.clearImportHandler = nil
     self.ExportFrame.title:SetText("|cff00ccff" .. ACO:Translate(titleKey) .. "|r")
     self.ExportFrame.importBtn:Hide()
     self.ExportFrame.clearImportBtn:Hide()
@@ -4069,7 +4410,7 @@ function ACO:CreateImportExportFrame()
     end)
     importBtn:SetScript("OnClick", function()
         local text = editBox:GetText()
-        local count = ACO:ImportContainers(text, false)
+        local count = frame.importHandler and frame.importHandler(text) or ACO:ImportContainers(text, false)
         if count > 0 then
             frame:Hide()
         end
@@ -4105,7 +4446,7 @@ function ACO:CreateImportExportFrame()
     end)
     clearImportBtn:SetScript("OnClick", function()
         local text = editBox:GetText()
-        local count = ACO:ImportContainers(text, true)
+        local count = frame.clearImportHandler and frame.clearImportHandler(text) or ACO:ImportContainers(text, true)
         if count > 0 then
             frame:Hide()
         end
@@ -4128,6 +4469,8 @@ function ACO:ShowImportFrame()
         self:CreateImportExportFrame()
     end
     self.ExportFrame.editBox:SetText("")
+    self.ExportFrame.importHandler = nil
+    self.ExportFrame.clearImportHandler = nil
     self.ExportFrame.title:SetText("|cff00ff80" .. ACO:Translate("IMPORT_FRAME_TITLE") .. "|r")
     self.ExportFrame.importBtn:Show()
     self.ExportFrame.clearImportBtn:Show()
@@ -4146,6 +4489,8 @@ function ACO:ShowExportFrame()
         return
     end
     self.ExportFrame.editBox:SetText(exportStr)
+    self.ExportFrame.importHandler = nil
+    self.ExportFrame.clearImportHandler = nil
     self.ExportFrame.title:SetText("|cff00ccff" .. ACO:Translate("EXPORT_FRAME_TITLE") .. "|r")
     self.ExportFrame.importBtn:Hide()
     self.ExportFrame.clearImportBtn:Hide()
